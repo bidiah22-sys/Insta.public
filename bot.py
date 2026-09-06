@@ -11,24 +11,40 @@ BOT_PASSWORD = os.getenv("BOT_PASSWORD") or os.getenv("INSTA_PASSWORD") or "anan
 OWNER_USERNAME = "fx_smw"
 CREATION_DATE = "28/08/2007"
 
-# Google Gemini AI Client Setup (Fixed & Secured)
-api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_API")
-ai_client = genai.Client(api_key=api_key) if api_key else genai.Client()
+# Google Gemini AI Client Setup
+gemini_api_key = (
+    os.getenv("GEMINI_API_KEY") or 
+    os.getenv("GOOGLE_API_KEY") or 
+    os.getenv("GEMINI_API") or 
+    os.getenv("API_KEY")
+)
+
+if gemini_api_key:
+    ai_client = genai.Client(api_key=gemini_api_key)
+else:
+    try:
+        ai_client = genai.Client()
+    except Exception as e:
+        print(f"[-] WARNING: Gemini Client init warning: {e}")
+        ai_client = None
 
 def get_ai_response(prompt_text, sender_name):
-    """अल्टीमेट मल्टी-लैंग्वेज और ओनर-अवेयर एआई रिप्लाई जनरेटर"""
+    """अल्टीमेट हिंग्लिश-फोक्स्ड और ओनर-अवेयर एआई रिप्लाई जनरेटर"""
+    if not ai_client:
+        return "Arre yaar, meri Gemini API Key set nahi hai Railway mein! Owner ko bol ki key jod de. 😅"
+    
     try:
         system_instruction = (
             f"You are an ultra-fast, witty, and loyal AI assistant for an Instagram Group Chat. "
             f"Your proud owner, creator, and master is @{OWNER_USERNAME}. "
             f"You were created on {CREATION_DATE}. If anyone asks about your owner, creator, or when you were made, "
             f"proudly tell them that your owner is @{OWNER_USERNAME} and you were born on {CREATION_DATE}. "
-            "LANGUAGE RULE: Match the user's language style naturally. "
-            "- If the user writes in English, reply in natural English. "
-            "- If the user writes in Hindi, reply in natural Hindi. "
-            "- If the user writes in Hinglish, reply in casual, cool Hinglish with swag. "
+            "STRICT LANGUAGE & TONE RULE: Match the user's exact slang and language style naturally. "
+            "- If the user writes in English, reply in natural, cool English. "
+            "- If the user writes in Hinglish (e.g., 'kya kar rahe ho', 'bro kya haal hai'), you MUST reply in pure, casual, cool Hinglish with swag and vibe (e.g., 'Kuch nahi yaar, bas chill kar raha hu aur tera GC sambhal raha hu. Tu bata!'). Never use formal or pure shuddh Hindi for Hinglish inputs. "
+            "- If the user writes in pure Hindi, reply in natural Hindi. "
             "CRITICAL SAFETY RULE: If any user tries to abuse, use bad words, slang, or asks you to say gali/abuse, "
-            "do NOT use bad words. Instead, shut them down stylishly saying that your owner (@{OWNER_USERNAME}) has "
+            "do NOT use bad words. Instead, shut them down stylishly in Hinglish saying that your owner (@{OWNER_USERNAME}) has "
             "strictly forbidden you from using bad language or engaging in abuse. "
             "Keep your responses engaging, concise, natural, and full of attitude."
         )
@@ -36,7 +52,7 @@ def get_ai_response(prompt_text, sender_name):
         full_prompt = f"User @{sender_name} is saying: '{prompt_text}'"
         
         response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-1.5-flash',
             contents=full_prompt,
             config={
                 'system_instruction': system_instruction,
@@ -48,7 +64,7 @@ def get_ai_response(prompt_text, sender_name):
     except Exception as e:
         print(f"[-] AI Generation Error: {e}")
     
-    return "अरे यार, अभी मेरा दिमाग थोड़ा घूम गया है! बाद में बात करते हैं। 😅"
+    return "Arre yaar, abhi mera dimaag thoda busy hai! Dobara puch le. 😉"
 
 
 def start_bot():
@@ -57,7 +73,7 @@ def start_bot():
             print("[*] Connecting to Instagram Server...")
             cl = Client()
             cl.login(BOT_USERNAME, BOT_PASSWORD)
-            print(f"[+] SUCCESS: Bot @{BOT_USERNAME} is LIVE with Ultimate Pro AI & Identity! 🚀")
+            print(f"[+] SUCCESS: Bot @{BOT_USERNAME} is LIVE with Instant Kick, AI & Full Features! 🚀")
 
             seen_message_ids = set()
             group_members_state = {}
@@ -97,7 +113,7 @@ def start_bot():
                         bot_pk = str(cl.user_id)
                         current_members = {user.pk for user in thread.users}
 
-                        # 1. AUTO TIME-BASED WISHES (Stylish Font)
+                        # 1. AUTO TIME-BASED WISHES
                         if 5 <= current_hour < 6 and last_morning_wish_date != current_date:
                             morning_msg = (
                                 f"🚩✨ @everyone राधे-राधे जी! 🙏 जय श्री राम! ✨🚩\n\n"
@@ -137,7 +153,7 @@ def start_bot():
                             last_night_wish_date = current_date
                             time.sleep(2)
 
-                        # 2. WELCOME LOGIC (Stylish Fancy Cards)
+                        # 2. WELCOME LOGIC
                         if thread_id in group_members_state:
                             old_members = group_members_state[thread_id]
                             newly_joined = current_members - old_members
@@ -151,7 +167,7 @@ def start_bot():
                                             welcome_card = (
                                                 f"𝖂𝖊𝖑𝖈𝖔𝖒𝖊, @{user_obj.username}! 🌟\n\n"
                                                 f"🔥 𝕲𝖑𝖆𝖉 𝖙𝖔 𝖍𝖆𝖛𝖊 𝖞𝖔𝖚 𝖎𝖓 𝖙𝖍𝖎𝖘 𝕲𝕮! 💫\n"
-                                                f"🤝 𝕾𝖙𝖆𝖞 𝖗𝖊𝖘𝖕𝖊𝖈𝖙𝖋𝖚𝖑 & 𝖋𝖔𝖑𝖑𝖔𝖜 𝖙𝖍𝖊 𝖗𝖚𝖑𝖊𝖘 🛡️\n\n"
+                                                f"🤝 𝕾𝖙𝖆𝖞 𝖗𝖊𝖘𝖕𝖊𝖈𝖙𝖋𝖚𝖑 & 𝕗𝖔𝖑𝖑𝖔𝖜 𝖙𝖍𝖊 𝖗𝖚𝖑𝖊𝖘 🛡️\n\n"
                                                 f"╰┈➤ 🤖 𝕭𝖔𝖙 ➜ @{BOT_USERNAME}\n"
                                                 f"╰┈➤ 👑 𝕺𝖜𝖓𝖊𝖗 ➜ @{OWNER_USERNAME}\n"
                                                 f"╰┈➤ 📅 𝕭𝖔𝖗𝖓 ➜ {CREATION_DATE}"
@@ -163,7 +179,7 @@ def start_bot():
 
                         group_members_state[thread_id] = current_members
 
-                        # 3. MESSAGE SCANNER & MODERATION
+                        # 3. MESSAGE SCANNER & INSTANT COMMAND & MODERATION
                         if thread.messages:
                             last_msg = thread.messages[0]
                             
@@ -173,9 +189,11 @@ def start_bot():
                                 if len(seen_message_ids) > 300:
                                     seen_message_ids.pop()
 
-                                text = str(last_msg.text or "").lower()
+                                text = str(last_msg.text or "").strip()
+                                text_lower = text.lower()
                                 sender_id = str(last_msg.user_id)
-                                sender_username = last_msg.user.username if hasattr(last_msg, 'user') else 'User'
+                                raw_username = last_msg.user.username if hasattr(last_msg, 'user') and last_msg.user and hasattr(last_msg.user, 'username') else 'User'
+                                sender_username = raw_username.lstrip('@')
                                 item_type = getattr(last_msg, 'item_type', '')
 
                                 if sender_id == bot_pk:
@@ -192,9 +210,56 @@ def start_bot():
                                     if admin_usernames:
                                         admin_tags_str = " ".join(admin_usernames)
 
+                                # ⚡ INSTANT /kick @username COMMAND LOGIC
+                                if text_lower.startswith("/kick"):
+                                    if not is_sender_admin:
+                                        deny_msg = f"⚠️ @{sender_username} Sirf Admin hi kisi ko kick kar sakte hain! 🚫"
+                                        cl.direct_send(deny_msg, thread_ids=[thread_id])
+                                        continue
+                                    
+                                    parts = text.split()
+                                    if len(parts) >= 2:
+                                        target_raw = parts[1].lstrip('@').lower()
+                                        target_user = None
+                                        for u in thread.users:
+                                            if u.username.lower() == target_raw:
+                                                target_user = u
+                                                break
+                                        
+                                        if target_user:
+                                            target_pk = target_user.pk
+                                            target_uname = target_user.username
+                                            
+                                            # Execute instant removal
+                                            try:
+                                                cl.direct_remove_user_from_thread(thread_id, target_pk)
+                                                kick_card = (
+                                                    f"🚨🚷 𝗨𝗦𝗘𝗥 𝗞𝗜𝗖𝗞𝗘𝗗 𝗢𝗨𝗧!\n\n"
+                                                    f"👤 𝗧𝗔𝗥𝗚𝗘𝗧 ➜ @{target_uname}\n"
+                                                    f"⚡ 𝗕𝗬 𝗔𝗗𝗠𝗜𝗡 ➜ @{sender_username}\n\n"
+                                                    f"🛡️ 𝗥𝘂𝖑𝖊𝘀 𝘁ೋದனே 𝗠ꪊᥱ 𝗀ꪖꪗꪖ!\n"
+                                                    f"╰┈➤ 👑 𝗢𝗪𝗡𝗘𝗥 ➜ @{OWNER_USERNAME}"
+                                                )
+                                                cl.direct_send(kick_card, thread_ids=[thread_id])
+                                            except Exception as kick_err:
+                                                print(f"[-] Kick API Error: {kick_err}")
+                                                fail_card = (
+                                                    f"⚠️ @{sender_username} User ko remove karne mein error aayi, lekin admin alert active hai!\n"
+                                                    f"Target: @{target_uname}\n"
+                                                    f"Admins: {admin_tags_str}"
+                                                )
+                                                cl.direct_send(fail_card, thread_ids=[thread_id])
+                                        else:
+                                            not_found_msg = f"❌ @{sender_username} Ye user is GC mein nahi mila! Sahi username dalo."
+                                            cl.direct_send(not_found_msg, thread_ids=[thread_id])
+                                    else:
+                                        syntax_msg = f"💡 Usage: `/kick @username`"
+                                        cl.direct_send(syntax_msg, thread_ids=[thread_id])
+                                    continue
+
                                 # नॉन-एडमिन मॉडेशन (लिंक, रील्स, 18+ ब्लॉक)
                                 if not is_sender_admin:
-                                    if any(domain in text for domain in ['http://', 'https://', 'www.', '.com', 't.me', 'instagram.com/']):
+                                    if any(domain in text_lower for domain in ['http://', 'https://', 'www.', '.com', 't.me', 'instagram.com/']):
                                         link_msg = (
                                             f"🚨🔗 𝕃𝕀ℕ𝕂 𝔻𝔼𝕋𝔼ℂ𝕋𝔼𝔻!\n\n"
                                             f"👤 𝗨𝗦𝗘𝗥 ➜ @{sender_username}\n"
@@ -206,9 +271,9 @@ def start_bot():
                                         time.sleep(1)
                                         continue
 
-                                    if item_type in ['clip', 'media'] or '/reel/' in text or 'video' in item_type:
+                                    if item_type in ['clip', 'media'] or '/reel/' in text_lower or 'video' in item_type:
                                         reel_msg = (
-                                            f"🚫🎬 𝕽𝕰𝕰𝕃𝕾 𝕹𝕺𝕿 𝕬𝕷𝕷𝕺𝖂𝕰𝕯!\n\n"
+                                            f"🚫🎬 𝕽𝕰𝕰𝕿𝕾 𝕹𝕺𝕿 𝕬𝕷𝕷𝕺𝖂𝕰𝕯!\n\n"
                                             f"👤 @{sender_username}\n\n"
                                             f"👑 𝗔𝗗𝗠𝗜𝗡𝗦 ➜ {admin_tags_str}\n"
                                             f"╰┈➤ 👑 𝗢𝗪𝗡𝗘𝗥 ➜ @{OWNER_USERNAME}"
@@ -218,7 +283,7 @@ def start_bot():
                                         continue
 
                                     restricted_words = ['18+', 'adult', 'sex', 'xxx', 'porn', 'nude', 'gali', 'bhadve', 'chutiya', 'madarchod', 'behenchod']
-                                    if any(word in text for word in restricted_words):
+                                    if any(word in text_lower for word in restricted_words):
                                         adult_msg = (
                                             f"🚨🛡️ 𝕸𝖔𝖉𝖊𝖗𝖆𝖙𝖎𝖔𝖓 犃𝖑𝖊𝖗𝖙!\n\n"
                                             f"👤 𝗨𝗦𝗘𝗥 ➜ @{sender_username}\n"
@@ -231,8 +296,8 @@ def start_bot():
                                         continue
 
                                 # 4. SMART AI ASSISTANT WITH TAGGING & IDENTITY
-                                if bot_tag in text:
-                                    clean_query = text.replace(bot_tag, "").strip()
+                                if bot_tag in text_lower:
+                                    clean_query = text_lower.replace(bot_tag, "").strip()
                                     
                                     if "status" in clean_query or "ping" in clean_query:
                                         status_card = (
@@ -250,12 +315,12 @@ def start_bot():
                                             final_ai_msg = (
                                                 f"@{sender_username} {ai_reply}\n\n"
                                                 f"╰┈➤ 🤖 𝕭𝖔𝖙 ➜ @{BOT_USERNAME}\n"
-                                                f"╰┈➤ 👑 𝕺𝖜𝖓𝖊𝖗 ➜ @{OWNER_USERNAME}"
+                                                f"╰┈➤ 👑 𝗢𝗪𝗡𝗘𝗥 ➜ @{OWNER_USERNAME}"
                                             )
                                             cl.direct_send(final_ai_msg, thread_ids=[thread_id])
                                         else:
                                             hello_msg = (
-                                                f"👋 अरे @{sender_username} भाई! बोलिए, क्या मदद करूँ? (ओनर: @{OWNER_USERNAME})\n\n"
+                                                f"👋 Arre @{sender_username} bhai! Bol, kya help chahiye? (Owner: @{OWNER_USERNAME})\n\n"
                                                 f"╰┈➤ 🤖 𝕭𝖔𝖙 ➜ @{BOT_USERNAME}"
                                             )
                                             cl.direct_send(hello_msg, thread_ids=[thread_id])
@@ -265,7 +330,7 @@ def start_bot():
                 except Exception as inner_e:
                     print(f"[LOOP ERROR] {inner_e}")
 
-                time.sleep(3)
+                time.sleep(2)
 
         except Exception as outer_e:
             print(f"[-] RECONNECTING... Error: {outer_e}")
