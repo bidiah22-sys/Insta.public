@@ -1,28 +1,34 @@
-import os
-import time
-from instagrapi import Client
+const { IgApiClient } = require('instagram-private-api');
 
-# Railway के वेरिएबल्स से यूजरनेम और पासवर्ड उठाएगा
-USERNAME = os.getenv("INSTA_USERNAME")
-PASSWORD = os.getenv("INSTA_PASSWORD")
+const ig = new IgApiClient();
 
-def start_bot():
-    print("Connecting to Instagram...")
-    cl = Client()
-    
-    try:
-        # सीधा लॉगिन करने की कोशिश करेगा
-        cl.login(USERNAME, PASSWORD)
-        print("Logged in successfully!")
+async function startBot() {
+    try {
+        console.log("Starting bot login...");
         
-        # यहाँ तेरा बोट का आगे का मॉडération वाला काम चलेगा
-        while True:
-            print("Bot is active and running smoothly...")
-            time.sleep(60)
-            
-    except Exception as e:
-        print(f"LOGIN ERROR: {e}")
+        const username = process.env.INSTA_USERNAME;
+        const password = process.env.INSTA_PASSWORD;
 
-if __name__ == "__main__":
-    start_bot()
+        if (!username || !password) {
+            console.error("ERROR: Username or Password not found in Environment Variables!");
+            return;
+        }
+
+        ig.state.generateDevice(username);
+        
+        await ig.account.login(username, password);
+        console.log("Logged in successfully to Instagram!");
+
+        // बोट चालू रहेगा
+        setInterval(() => {
+            console.log("Bot is running smoothly...");
+        }, 60000);
+
+    } catch (error) {
+        console.error("LOGIN FAILED:", error.message);
+    }
+}
+
+startBot();
+
 
