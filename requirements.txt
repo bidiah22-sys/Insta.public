@@ -1,1 +1,3 @@
 instagrapi
+google-genai
+
