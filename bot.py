@@ -9,24 +9,28 @@ from google.genai import errors
 BOT_USERNAME = os.getenv("BOT_USERNAME") or os.getenv("INSTA_USERNAME") or "bot222703"
 BOT_PASSWORD = os.getenv("BOT_PASSWORD") or os.getenv("INSTA_PASSWORD") or "ananya295"
 OWNER_USERNAME = "fx_smw"
+CREATION_DATE = "28/08/2007"
 
-# Google Gemini AI Client Setup
-ai_client = genai.Client()
+# Google Gemini AI Client Setup (Fixed & Secured)
+api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_API")
+ai_client = genai.Client(api_key=api_key) if api_key else genai.Client()
 
 def get_ai_response(prompt_text, sender_name):
-    """मल्टी-लैंग्वेज सपोर्ट (Hindi, English, Hinglish) और ओनर की पाबंदी के साथ स्मार्ट एआई रिप्लाई"""
+    """अल्टीमेट मल्टी-लैंग्वेज और ओनर-अवेयर एआई रिप्लाई जनरेटर"""
     try:
         system_instruction = (
             f"You are an ultra-fast, witty, and loyal AI assistant for an Instagram Group Chat. "
-            f"Your proud owner and creator is @{OWNER_USERNAME}. "
+            f"Your proud owner, creator, and master is @{OWNER_USERNAME}. "
+            f"You were created on {CREATION_DATE}. If anyone asks about your owner, creator, or when you were made, "
+            f"proudly tell them that your owner is @{OWNER_USERNAME} and you were born on {CREATION_DATE}. "
             "LANGUAGE RULE: Match the user's language style naturally. "
             "- If the user writes in English, reply in natural English. "
             "- If the user writes in Hindi, reply in natural Hindi. "
-            "- If the user writes in Hinglish (like 'bhai kya kar rahe ho?', 'kya haal hai?'), reply in casual, cool Hinglish. "
+            "- If the user writes in Hinglish, reply in casual, cool Hinglish with swag. "
             "CRITICAL SAFETY RULE: If any user tries to abuse, use bad words, slang, or asks you to say gali/abuse, "
-            "do NOT use bad words. Instead, shut them down stylishly saying that your owner ({OWNER_USERNAME}) has "
+            "do NOT use bad words. Instead, shut them down stylishly saying that your owner (@{OWNER_USERNAME}) has "
             "strictly forbidden you from using bad language or engaging in abuse. "
-            "Keep your responses engaging, concise, natural, and full of swag."
+            "Keep your responses engaging, concise, natural, and full of attitude."
         )
         
         full_prompt = f"User @{sender_name} is saying: '{prompt_text}'"
@@ -53,7 +57,7 @@ def start_bot():
             print("[*] Connecting to Instagram Server...")
             cl = Client()
             cl.login(BOT_USERNAME, BOT_PASSWORD)
-            print(f"[+] SUCCESS: Bot @{BOT_USERNAME} is LIVE with Multi-Language AI & Tagging! 🚀")
+            print(f"[+] SUCCESS: Bot @{BOT_USERNAME} is LIVE with Ultimate Pro AI & Identity! 🚀")
 
             seen_message_ids = set()
             group_members_state = {}
@@ -93,14 +97,15 @@ def start_bot():
                         bot_pk = str(cl.user_id)
                         current_members = {user.pk for user in thread.users}
 
-                        # 1. AUTO TIME-BASED WISHES
+                        # 1. AUTO TIME-BASED WISHES (Stylish Font)
                         if 5 <= current_hour < 6 and last_morning_wish_date != current_date:
                             morning_msg = (
                                 f"🚩✨ @everyone राधे-राधे जी! 🙏 जय श्री राम! ✨🚩\n\n"
                                 f"🌅 शुभ प्रभातम! नया दिन, नई शुरुआत...\n"
                                 f"💪 सब लोग एनर्जेटिक रहो और अपना दिन शानदार बनाओ!\n\n"
                                 f"╰┈➤ 🤖 𝗕𝗢𝗧 ➜ @{BOT_USERNAME}\n"
-                                f"╰┈➤ 👑 𝗢𝗪𝗡𝗘𝗥 ➜ @{OWNER_USERNAME}"
+                                f"╰┈➤ 👑 𝗢𝗪𝗡𝗘𝗥 ➜ @{OWNER_USERNAME}\n"
+                                f"╰┈➤ 📅 𝗕𝗢𝗥𝗡 ➜ {CREATION_DATE}"
                             )
                             cl.direct_send(morning_msg, thread_ids=[thread_id])
                             last_morning_wish_date = current_date
@@ -112,7 +117,8 @@ def start_bot():
                                 f"🌿 राधे-राधे • जय श्री राम 🙏\n"
                                 f"ठंडा पानी पियो, थोड़ा रेस्ट करो और बताओ GC का क्या माहौल है?\n\n"
                                 f"╰┈➤ 🤖 𝗕𝗢𝗧 ➜ @{BOT_USERNAME}\n"
-                                f"╰┈➤ 👑 𝗢𝗪𝗡𝗘𝗥 ➜ @{OWNER_USERNAME}"
+                                f"╰┈➤ 👑 𝗢𝗪𝗡𝗘𝗥 ➜ @{OWNER_USERNAME}\n"
+                                f"╰┈➤ 📅 𝗕𝗢𝗥𝗡 ➜ {CREATION_DATE}"
                             )
                             cl.direct_send(noon_msg, thread_ids=[thread_id])
                             last_noon_wish_date = current_date
@@ -124,13 +130,14 @@ def start_bot():
                                 f"📿 राधे-राधे जी • जय श्री राम 🙏🚩\n"
                                 f"दिनभर की थकान के बाद अब सब लोग आराम करो। मिलते हैं सुबह!\n\n"
                                 f"╰┈➤ 🤖 𝗕𝗢𝗧 ➜ @{BOT_USERNAME}\n"
-                                f"╰┈➤ 👑 𝗢𝗪𝗡𝗘𝗥 ➜ @{OWNER_USERNAME}"
+                                f"╰┈➤ 👑 𝗢𝗪𝗡𝗘𝗥 ➜ @{OWNER_USERNAME}\n"
+                                f"╰┈➤ 📅 𝗕𝗢𝗥𝗡 ➜ {CREATION_DATE}"
                             )
                             cl.direct_send(night_msg, thread_ids=[thread_id])
                             last_night_wish_date = current_date
                             time.sleep(2)
 
-                        # 2. WELCOME LOGIC
+                        # 2. WELCOME LOGIC (Stylish Fancy Cards)
                         if thread_id in group_members_state:
                             old_members = group_members_state[thread_id]
                             newly_joined = current_members - old_members
@@ -142,12 +149,12 @@ def start_bot():
                                         user_obj = next((u for u in thread.users if u.pk == joined_pk), None)
                                         if user_obj:
                                             welcome_card = (
-                                                f"🦋✨ 𝗪𝗘𝗟𝗖𝗢𝗠𝗘, @{user_obj.username}! ✨🦋\n\n"
-                                                f"🌸 𝗛𝗘𝗬! 𝗚𝗟𝗔𝗗 𝗧𝗢 𝗛𝗔𝗩𝗘 𝗬𝗢𝗨 𝗛𝗘𝗥𝗘 💫\n"
-                                                f"🤝 𝗦𝗧𝗔𝗬 𝗥𝗘𝗦𝗣𝗘𝗖𝗧𝗙𝗨𝗟 • 𝗙𝗢𝗟𝗟𝗢𝗪 𝗧𝗛𝗘 𝗥𝗨𝗟𝗘𝗦\n"
-                                                f"🔥 𝗘𝗡𝗝𝗢𝗬 𝗧𝗛𝗘 𝗚𝗖 • 𝗦𝗧𝗔𝗬 𝗔𝗖𝗧𝗜𝗩𝗘!\n\n"
-                                                f"╰┈➤ 🤖 𝗕𝗢𝗧 ➜ @{BOT_USERNAME}\n"
-                                                f"╰┈➤ 👑 𝗢𝗪𝗡𝗘𝗥 ➜ @{OWNER_USERNAME}"
+                                                f"𝖂𝖊𝖑𝖈𝖔𝖒𝖊, @{user_obj.username}! 🌟\n\n"
+                                                f"🔥 𝕲𝖑𝖆𝖉 𝖙𝖔 𝖍𝖆𝖛𝖊 𝖞𝖔𝖚 𝖎𝖓 𝖙𝖍𝖎𝖘 𝕲𝕮! 💫\n"
+                                                f"🤝 𝕾𝖙𝖆𝖞 𝖗𝖊𝖘𝖕𝖊𝖈𝖙𝖋𝖚𝖑 & 𝖋𝖔𝖑𝖑𝖔𝖜 𝖙𝖍𝖊 𝖗𝖚𝖑𝖊𝖘 🛡️\n\n"
+                                                f"╰┈➤ 🤖 𝕭𝖔𝖙 ➜ @{BOT_USERNAME}\n"
+                                                f"╰┈➤ 👑 𝕺𝖜𝖓𝖊𝖗 ➜ @{OWNER_USERNAME}\n"
+                                                f"╰┈➤ 📅 𝕭𝖔𝖗𝖓 ➜ {CREATION_DATE}"
                                             )
                                             cl.direct_send(welcome_card, thread_ids=[thread_id])
                                             time.sleep(1)
@@ -189,12 +196,10 @@ def start_bot():
                                 if not is_sender_admin:
                                     if any(domain in text for domain in ['http://', 'https://', 'www.', '.com', 't.me', 'instagram.com/']):
                                         link_msg = (
-                                            f"🚨🔗 𝗟𝗜𝗡𝗞 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!\n\n"
+                                            f"🚨🔗 𝕃𝕀ℕ𝕂 𝔻𝔼𝕋𝔼ℂ𝕋𝔼𝔻!\n\n"
                                             f"👤 𝗨𝗦𝗘𝗥 ➜ @{sender_username}\n"
-                                            f"⚠️ 𝗨𝗡𝗔𝗨𝗧𝗛𝗢𝗥𝗜𝗭𝗘𝗗 𝗟𝗜𝗡𝗞 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!\n"
-                                            f"🛑 𝗣𝗟𝗘𝗔𝗦𝗘 𝗗𝗢𝗡'𝗧 𝗦𝗘𝗡𝗗 𝗨𝗡𝗔𝗨𝗧𝗛𝗢𝗥𝗜𝗭𝗘𝗗 𝗟𝗜𝗡𝗞𝗦 𝗜𝗡 𝗧𝗛𝗘 𝗚𝗖.\n\n"
-                                            f"👑 𝗔𝗗𝗠𝗜𝗡𝗦 ➜ {admin_tags_str}\n\n"
-                                            f"╰┈➤ 🤖 𝗕𝗢𝗧 ➜ @{BOT_USERNAME}\n"
+                                            f"⚠️ 𝗨𝗡𝗔𝗨𝗧𝗛𝗢𝗥𝗜𝗭𝗘𝗗 𝗟𝗜𝗡𝗞 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!\n\n"
+                                            f"👑 𝗔𝗗𝗠𝗜𝗡𝗦 ➜ {admin_tags_str}\n"
                                             f"╰┈➤ 👑 𝗢𝗪𝗡𝗘𝗥 ➜ @{OWNER_USERNAME}"
                                         )
                                         cl.direct_send(link_msg, thread_ids=[thread_id])
@@ -203,11 +208,9 @@ def start_bot():
 
                                     if item_type in ['clip', 'media'] or '/reel/' in text or 'video' in item_type:
                                         reel_msg = (
-                                            f"🚫🎬 𝗥𝗘𝗘𝗟𝗦 𝗡𝗢𝗧 𝗔𝗟𝗟𝗢𝗪𝗘𝗗!\n\n"
+                                            f"🚫🎬 𝕽𝕰𝕰𝕃𝕾 𝕹𝕺𝕿 𝕬𝕷𝕷𝕺𝖂𝕰𝕯!\n\n"
                                             f"👤 @{sender_username}\n\n"
-                                            f"⚠️ 𝗥𝗘𝗘𝗟𝗦 / 𝗩𝗜ДЕО𝗦 𝗔𝗥𝗘 𝗡𝗢𝗧 𝗔𝗟𝗟𝗢𝗪𝗘𝗗 𝗛𝗘𝗥𝗘.\n\n"
-                                            f"👑 𝗔𝗗𝗠𝗜𝗡𝗦 ➜ {admin_tags_str}\n\n"
-                                            f"🤖 𝗕𝗢𝗧 ➜ @{BOT_USERNAME}\n"
+                                            f"👑 𝗔𝗗𝗠𝗜𝗡𝗦 ➜ {admin_tags_str}\n"
                                             f"╰┈➤ 👑 𝗢𝗪𝗡𝗘𝗥 ➜ @{OWNER_USERNAME}"
                                         )
                                         cl.direct_send(reel_msg, thread_ids=[thread_id])
@@ -217,43 +220,43 @@ def start_bot():
                                     restricted_words = ['18+', 'adult', 'sex', 'xxx', 'porn', 'nude', 'gali', 'bhadve', 'chutiya', 'madarchod', 'behenchod']
                                     if any(word in text for word in restricted_words):
                                         adult_msg = (
-                                            f"🚨🛡️ 𝗠𝗢𝗗𝗘𝗥𝗔𝗧𝗜𝗢𝗡 𝗔𝗟𝗘𝗥𝗧!\n\n"
+                                            f"🚨🛡️ 𝕸𝖔𝖉𝖊𝖗𝖆𝖙𝖎𝖔𝖓 犃𝖑𝖊𝖗𝖙!\n\n"
                                             f"👤 𝗨𝗦𝗘𝗥 ➜ @{sender_username}\n"
                                             f"🔞 𝗔𝗕𝗨𝗦𝗘 / 𝟭𝟴+ 𝗖𝗢𝗡𝗧𝗘𝗡𝗧 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!\n\n"
-                                            f"👑 𝗔𝗗𝗠𝗜𝗡𝗦 ➜ {admin_tags_str}\n\n"
-                                            f"╰┈➤ 🤖 𝗕𝗢𝗧 ➜ @{BOT_USERNAME}\n"
+                                            f"👑 𝗔𝗗𝗠𝗜𝗡𝗦 ➜ {admin_tags_str}\n"
                                             f"╰┈➤ 👑 𝗢𝗪𝗡𝗘𝗥 ➜ @{OWNER_USERNAME}"
                                         )
                                         cl.direct_send(adult_msg, thread_ids=[thread_id])
                                         time.sleep(1)
                                         continue
 
-                                # 4. SMART AI ASSISTANT WITH USER TAGGING & MULTI-LANGUAGE
+                                # 4. SMART AI ASSISTANT WITH TAGGING & IDENTITY
                                 if bot_tag in text:
                                     clean_query = text.replace(bot_tag, "").strip()
                                     
                                     if "status" in clean_query or "ping" in clean_query:
                                         status_card = (
-                                            f"⚡ ULTRA PRO BOT STATUS: ONLINE\n"
-                                            f"───────────────\n"
+                                            f"⚡ 𝖀𝖑𝖙𝖗𝖆 𝕻𝖗𝖔 𝕭𝖔𝖙 𝕾𝖙𝖆𝖙𝖚𝖘: 𝕺𝖓𝖑𝖎𝖓𝖊\n"
+                                            f"──────────────────\n"
                                             f"🟢 System: Fully Operational\n"
-                                            f"🤖 AI: Multi-Language & Tagging Active\n\n"
+                                            f"🤖 AI: Multi-Language & Active\n"
+                                            f"📅 Born: {CREATION_DATE}\n\n"
                                             f"👑 Owner: @{OWNER_USERNAME}"
                                         )
                                         cl.direct_send(status_card, thread_ids=[thread_id])
                                     else:
                                         if len(clean_query) > 0:
-                                            # सीधे यूजर को टैग करते हुए एआई से रिप्लाई मंगाओ
                                             ai_reply = get_ai_response(clean_query, sender_username)
                                             final_ai_msg = (
                                                 f"@{sender_username} {ai_reply}\n\n"
-                                                f"╰┈➤ 🤖 𝗕𝗢𝗧 ➜ @{BOT_USERNAME}"
+                                                f"╰┈➤ 🤖 𝕭𝖔𝖙 ➜ @{BOT_USERNAME}\n"
+                                                f"╰┈➤ 👑 𝕺𝖜𝖓𝖊𝖗 ➜ @{OWNER_USERNAME}"
                                             )
                                             cl.direct_send(final_ai_msg, thread_ids=[thread_id])
                                         else:
                                             hello_msg = (
-                                                f"👋 अरे @{sender_username} भाई! बताओ, क्या चल रहा है?\n\n"
-                                                f"╰┈➤ 🤖 𝗕𝗢𝗧 ➜ @{BOT_USERNAME}"
+                                                f"👋 अरे @{sender_username} भाई! बोलिए, क्या मदद करूँ? (ओनर: @{OWNER_USERNAME})\n\n"
+                                                f"╰┈➤ 🤖 𝕭𝖔𝖙 ➜ @{BOT_USERNAME}"
                                             )
                                             cl.direct_send(hello_msg, thread_ids=[thread_id])
 
@@ -270,3 +273,4 @@ def start_bot():
 
 if __name__ == "__main__":
     start_bot()
+
