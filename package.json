@@ -1,7 +1,6 @@
 {
-  "name": "insta-bot",
+  "name": "instagram-bot",
   "version": "1.0.0",
-  "description": "Instagram moderation bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -10,3 +9,4 @@
     "instagram-private-api": "^1.45.3"
   }
 }
+
