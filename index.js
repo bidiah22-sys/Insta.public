@@ -1,224 +1,126 @@
-import time
-from instagrapi import Client
+const { IgApiClient } = require('instagram-private-api');
 
-# ==========================================
-# ⚙️ BOT CREDENTIALS
-# ==========================================
-BOT_USERNAME = "bot222703"  # ⚠️ बोट का यूजरनेम (बिना @)
-BOT_PASSWORD = "ananya295"  # ⚠️ बोट का पासवर्ड
+const ig = new IgApiClient();
 
-# ==========================================
-# 👑 OWNER INSTAGRAM ID
-# ==========================================
-OWNER_USERNAME = "fx_smw"
+async function startBot() {
+    try {
+        console.log("Starting debugging bot login...");
+        
+        const username = process.env.INSTA_USERNAME;
+        const password = process.env.INSTA_PASSWORD;
 
-cl = Client()
+        if (!username || !password) {
+            console.error("ERROR: Username or Password not found in Environment Variables!");
+            return;
+        }
 
-print("[*] Connecting to Instagram Server...")
+        ig.state.generateDevice(username);
+        await ig.account.login(username, password);
+        console.log("Logged in successfully to Instagram!");
 
-login_success = False
-try:
-    cl.login(BOT_USERNAME, BOT_PASSWORD)
-    print(f"[+] SUCCESS: Bot @{BOT_USERNAME} is LIVE and Powered Up in Ultra Mode! 🚀")
-    login_success = True
-except Exception as e:
-    print(f"[-] LOGIN ERROR: {e}")
+        const processedItems = new Set();
+        const botUserId = ig.state.cookieUserId;
 
-seen_message_ids = set()
-group_members_state = {}
-ever_seen_members = set()
-
-if login_success:
-    print("[*] Bot Active & Scanning GC at High Speed...")
-    while True:
-        try:
-            threads = cl.direct_threads(amount=5)
-
-            for thread in threads:
-                if not thread.is_group:
-                    continue
-
-                thread_id = thread.id
-                bot_tag = f"@{BOT_USERNAME.lower()}"
-
-                # 1. Real-time Admins Verification
-                gc_admins = []
-                try:
-                    if hasattr(thread, 'admin_user_ids') and thread.admin_user_ids:
-                        gc_admins = [str(uid) for uid in thread.admin_user_ids]
-                    elif hasattr(thread, 'admin_users') and thread.admin_users:
-                        gc_admins = [str(getattr(admin, 'pk', admin)) for admin in thread.admin_users]
-                except Exception:
-                    gc_admins = []
-
-                bot_pk = str(cl.user_id)
+        // सुपर-फास्ट स्कैनिंग लूप (हर 3 सेकंड)
+        setInterval(async () => {
+            try {
+                const inbox = await ig.feed.directInbox().items();
                 
-                # बोट खुद एडमिन है या नहीं, इसका कड़ा चेक
-                is_bot_admin = (bot_pk in gc_admins) if gc_admins else True
+                for (const thread of inbox) {
+                    if (!thread.items || thread.items.length === 0) continue;
+                    
+                    const lastItem = thread.items[0];
+                    const itemId = lastItem.item_id;
 
-                # 2. WELCOME & WELCOME BACK LOGIC (अगर बोट एडमिन है)
-                current_members = {user.pk for user in thread.users}
+                    if (processedItems.has(itemId)) continue;
+                    processedItems.add(itemId);
 
-                if thread_id in group_members_state:
-                    old_members = group_members_state[thread_id]
-                    newly_joined = current_members - old_members
+                    if (processedItems.size > 200) {
+                        const firstKey = processedItems.keys().next().value;
+                        processedItems.delete(firstKey);
+                    }
 
-                    if newly_joined and is_bot_admin:
-                        for joined_pk in newly_joined:
-                            user_obj = next((u for u in thread.users if u.pk == joined_pk), None)
-                            if user_obj:
-                                if joined_pk in ever_seen_members:
-                                    welcome_card = (
-                                        f"🦋✨ 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗕𝗔𝗖𝗞, @{user_obj.username}! ✨🦋\n\n"
-                                        f"🌷 𝗡𝗜𝗖𝗘 𝗧𝗢 𝗦𝗘𝗘 𝗬𝗢𝗨 𝗕𝗔𝗖𝗞!\n"
-                                        f"🔥 𝗦𝗧𝗔𝗬 𝗔𝗖𝗧𝗜𝗩𝗘 • 𝗙𝗢𝗟𝗟𝗢𝗪 𝗧𝗛𝗘 𝗥𝗨𝗟𝗘𝗦\n"
-                                        f"✨ 𝗘𝗡𝗝𝗢𝗬 𝗧𝗛𝗘 𝗚𝗖 & 𝗞𝗘𝗘𝗣 𝗧𝗛𝗘 𝗩𝗜𝗕𝗘 𝗚𝗢𝗢𝗗!\n\n"
-                                        f"╰┈➤ 🤖 𝗕𝗢𝗧 ➜ @{BOT_USERNAME}\n"
-                                        f"╰┈➤ 👨‍💻 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ @{OWNER_USERNAME}"
-                                    )
-                                else:
-                                    welcome_card = (
-                                        f"🦋✨ 𝗪𝗘𝗟𝗖𝗢𝗠𝗘, @{user_obj.username}! ✨🦋\n\n"
-                                        f"🌸 𝗛𝗘𝗬! 𝗚𝗟𝗔𝗗 𝗧𝗢 𝗛𝗔𝗩𝗘 𝗬𝗢𝗨 𝗛𝗘𝗥𝗘 💫\n"
-                                        f"🤝 𝗦𝗧𝗔𝗬 𝗥𝗘𝗦𝗣𝗘𝗖𝗧𝗙𝗨𝗟 • 𝗙𝗢𝗟𝗟𝗢𝗪 𝗧𝗛𝗘 𝗥𝗨𝗟𝗘𝗦\n"
-                                        f"🔥 𝗘𝗡𝗝𝗢𝗬 𝗧𝗛𝗘 𝗚𝗖 • 𝗦𝗧𝗔𝗬 𝗔𝗖𝗧𝗜𝗩𝗘!\n\n"
-                                        f"╰┈➤ 🤖 𝗕𝗢𝗧 ➜ @{BOT_USERNAME}\n"
-                                        f"╰┈➤ 👨‍💻 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ @{OWNER_USERNAME}"
-                                    )
-                                    ever_seen_members.add(joined_pk)
+                    const senderId = lastItem.user_id;
+                    const text = lastItem.text || '';
+                    const itemType = lastItem.item_type;
 
-                                cl.direct_send(welcome_card, thread_ids=[thread_id])
-                else:
-                    ever_seen_members.update(current_members)
+                    // अपने खुद के मैसेज इग्नोर करें
+                    if (senderId === botUserId) continue;
 
-                group_members_state[thread_id] = current_members
+                    console.log(`[DEBUG] New message in thread ${thread.thread_id} from user ${senderId}: "${text}" (Type: ${itemType})`);
 
-                # 3. MESSAGE & ULTRA SECURITY SCANNER
-                if thread.messages:
-                    last_msg = thread.messages[0]
-                    if last_msg.id not in seen_message_ids:
-                        seen_message_ids.add(last_msg.id)
+                    // --- एडमिन चेक ---
+                    let isAdmin = false;
+                    let adminTags = "@ADMIN";
 
-                        text = str(last_msg.text or "").lower()
-                        sender_id = str(last_msg.user_id)
-                        item_type = getattr(last_msg, 'item_type', '')
+                    try {
+                        if (thread.admin_user_ids && thread.admin_user_ids.length > 0) {
+                            if (thread.admin_user_ids.includes(botUserId)) {
+                                isAdmin = true;
+                            }
+                            adminTags = thread.admin_user_ids.map(id => `@admin`).join(' ');
+                        } else {
+                            // अगर लिस्ट नहीं मिलती तो सेफ्टी के लिए मान लेते हैं कि एडमिन है (ताकि टेस्टिंग अटके नहीं)
+                            isAdmin = true; 
+                        }
+                    } catch (e) {
+                        isAdmin = true; // Fallback
+                    }
 
-                        # अपने खुद के मैसेज इग्नोर करें
-                        if sender_id == bot_pk:
-                            continue
+                    if (!isAdmin) {
+                        console.log(`[DEBUG] Bot is not admin in thread ${thread.thread_id}. Skipping action.`);
+                        continue; 
+                    }
 
-                        # एडमिन टैग स्ट्रिंग तैयार करना
-                        admin_tags_str = " @ADMIN"
-                        if gc_admins:
-                            admin_usernames = []
-                            for u in thread.users:
-                                if str(u.pk) in gc_admins and str(u.pk) != bot_pk:
-                                    admin_usernames.append(f"@{u.username}")
-                            if admin_usernames:
-                                admin_tags_str = " ".join(admin_usernames)
+                    // ग्रुप में मैसेज भेजने का सही और पक्का तरीका (DirectThread entity)
+                    const directThread = ig.entity.directThread(thread.thread_id);
 
-                        # अगर बोट एडमिन नहीं है, तो सिक्योरिटी एक्शन ब्लॉक रहेंगे
-                        if is_bot_admin:
-                            # --- A. LINK BLOCKER ---
-                            if any(domain in text for domain in ['http://', 'https://', 'www.', '.com', 't.me', 'instagram.com/']):
-                                link_msg = (
-                                    f"🚨🔗 𝗟𝗜𝗡𝗞 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!\n\n"
-                                    f"👤 𝗨𝗦𝗘𝗥 ➜ @{last_msg.user.username if hasattr(last_msg, 'user') else 'User'}\n"
-                                    f"⚠️ 𝗨𝗡𝗔𝗨𝗧𝗛𝗢𝗥𝗜𝗭𝗘𝗗 𝗟𝗜𝗡𝗞 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!\n"
-                                    f"🛑 𝗣𝗟𝗘𝗔𝗦𝗘 𝗗𝗢𝗡'𝗧 𝗦𝗘𝗡𝗗 𝗨𝗡𝗔𝗨𝗧𝗛𝗢𝗥𝗜𝗭𝗘𝗗 𝗟𝗜𝗡𝗞𝗦 𝗜𝗡 𝗧𝗛𝗘 𝗚𝗖.\n\n"
-                                    f"⚡ 𝗥𝗘𝗣𝗘𝗔𝗧𝗘𝗗 𝗩𝗜𝗢𝗟𝗔𝗧𝗜𝗢𝗡𝗦 𝗠𝗔𝗬 𝗟𝗘𝗔𝗗 𝗧𝗢 𝗔𝗖𝗧𝗜𝗢𝗡 🚫\n\n"
-                                    f"👑 𝗔𝗗𝗠𝗜𝗡𝗦 ➜ {admin_tags_str}\n\n"
-                                    f"╰┈➤ 🤖 𝗕𝗢𝗧 ➜ @{BOT_USERNAME}\n"
-                                    f"╰┈➤ 👨‍💻 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ @{OWNER_USERNAME}"
-                                )
-                                cl.direct_send(link_msg, thread_ids=[thread_id])
-                                continue
+                    // --- 1. WELCOME ---
+                    if (itemType === 'user_joined' || text.toLowerCase().includes('/welcome')) {
+                        const welcomeMsg = `🦋✨ 𝗪𝗘𝗟𝗖𝗢𝗠𝗘, @USER! ✨🦋\n\n🌸 𝗛𝗘𝗬! 𝗚𝗟𝗔𝗗 𝗧𝗢 𝗛𝗔𝗩𝗘 𝗬𝗢𝗨 𝗛𝗘𝗥𝗘 💫\n🤝 𝗦𝗧𝗔𝗬 𝗥𝗘𝗦𝗣𝗘𝗖𝗧𝗙𝗨𝗟 • 𝗙𝗢𝗟𝗟𝗢𝗪 𝗧𝗛𝗘 𝗥𝗨𝗟𝗘𝗦\n🔥 𝗘𝗡𝗝𝗢𝗬 𝗧𝗛𝗘 GC • 𝗦𝗧𝗔𝗬 𝗔𝗖𝗧𝗜𝗩𝗘!\n\n╰┈➤ 🤖 𝗕𝗢𝗧 ➜ @bot222703\n╰┈➤ 👨‍💻 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ @fx_smw`;
+                        await directThread.broadcastText(welcomeMsg);
+                        console.log("[ACTION] Sent Welcome Message!");
+                        continue;
+                    }
 
-                            # --- B. REELS / VIDEO BLOCKER ---
-                            if item_type in ['clip', 'media'] or '/reel/' in text or 'video' in item_type:
-                                reel_msg = (
-                                    f"🚫🎬 𝗥𝗘𝗘𝗟𝗦 𝗡𝗢𝗧 𝗔𝗟𝗟𝗢𝗪𝗘𝗗!\n\n"
-                                    f"👤 @{last_msg.user.username if hasattr(last_msg, 'user') else 'User'}\n\n"
-                                    f"⚠️ 𝗥𝗘𝗘𝗟𝗦 / 𝗩𝗜𝗗𝗘𝗢𝗦 𝗔𝗥𝗘 𝗡𝗢𝗧 𝗔𝗟𝗟𝗢𝗪𝗘𝗗 𝗛𝗘𝗥𝗘.\n\n"
-                                    f"🛑 𝗣𝗟𝗘𝗔𝗦𝗘 𝗗𝗢𝗡'𝗧 𝗥𝗘𝗣𝗘𝗔𝗧!\n\n"
-                                    f"👑 𝗔𝗗𝗠𝗜𝗡𝗦 ➜ {admin_tags_str}\n\n"
-                                    f"🤖 𝗕𝗢𝗧 ➜ @{BOT_USERNAME}\n"
-                                    f"╰┈➤ 👨‍💻 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ @{OWNER_USERNAME}"
-                                )
-                                cl.direct_send(reel_msg, thread_ids=[thread_id])
-                                continue
+                    // --- 2. LINK BLOCKER ---
+                    if (text.includes('http://') || text.includes('https://') || text.includes('www.') || text.includes('.com') || text.includes('t.me')) {
+                        const linkMsg = `🚨🔗 𝗟𝗜𝗡𝗞 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!\n\n👤 𝗨𝗦𝗘𝗥 ➜ @USER\n⚠️ 𝗨𝗡𝗔𝗨𝗧𝗛𝗢𝗥𝗜𝗭𝗘𝗗 𝗟𝗜𝗡𝗞 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!\n🛑 𝗣𝗟𝗘𝗔𝗦𝗘 𝗗𝗢𝗡'𝗧 𝗦𝗘𝗡𝗗 𝗨𝗡𝗔𝗨𝗧𝗛𝗢𝗥𝗜𝗭𝗘𝗗 𝗟𝗜𝗡𝗞𝗦 𝗜𝗡 𝗧𝗛𝗘 𝗚𝗖.\n\n⚡ 𝗥𝗘𝗣𝗘𝗔𝗧𝗘𝗗 𝗩𝗜𝗢𝗟𝗔𝗧𝗜𝗢𝗡𝗦 𝗠𝗔𝗬 𝗟𝗘𝗔𝗗 𝗧𝗢 𝗔𝗖𝗧𝗜𝗢𝗡 🚫\n\n👑 𝗔𝗗𝗠𝗜𝗡𝗦 ➜ ${adminTags}\n\n╰┈➤ 🤖 𝗕𝗢𝗧 ➜ @bot222703\n╰┈➤ 👨‍💻 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ @fx_smw`;
+                        await directThread.broadcastText(linkMsg);
+                        console.log("[ACTION] Sent Link Block Alert!");
+                        continue;
+                    }
 
-                            # --- C. 18+ CONTENT / ABUSE ALERT ---
-                            restricted_words = ['18+', 'adult', 'sex', 'xxx', 'porn', 'nude', 'gali', 'bhadve']
-                            if any(word in text for word in restricted_words):
-                                adult_msg = (
-                                    f"🚨🛡️ 𝗠𝗢𝗗𝗘𝗥𝗔𝗧𝗜𝗢𝗡 𝗔𝗟𝗘𝗥𝗧!\n\n"
-                                    f"👤 𝗨𝗦𝗘𝗥 ➜ @{last_msg.user.username if hasattr(last_msg, 'user') else 'User'}\n"
-                                    f"🔞 𝟭𝟴+ / 𝗔𝗚𝗘-𝗥𝗘𝗦𝗧𝗥𝗜𝗖𝗧𝗘𝗗 𝗖𝗢𝗡𝗧𝗘𝗡𝗧 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!\n\n"
-                                    f"⚠️ 𝗨𝗡𝗔𝗣𝗣𝗥𝗢𝗣𝗥𝗜𝗔𝗧𝗘 𝗖𝗢𝗡𝗧𝗘𝗡𝗧 𝗜𝗦 𝗡𝗢𝗧 𝗔𝗟𝗟𝗢𝗪𝗘𝗗 𝗜𝗡 𝗧𝗛𝗜𝗦 𝗚𝗖.\n"
-                                    f"🗑️ 𝗣𝗟𝗘𝗔𝗦𝗘 𝗥𝗘𝗩𝗜𝗘𝗪 & 𝗥𝗘𝗠𝗢𝗩𝗘 𝗧𝗛𝗘 𝗖𝗢𝗡𝗧𝗘𝗡𝗧.\n\n"
-                                    f"👑 𝗔𝗗𝗠𝗜𝗡𝗦 ➜ {admin_tags_str}\n\n"
-                                    f"╰┈➤ 🤖 𝗕𝗢𝗧 ➜ @{BOT_USERNAME}\n"
-                                    f"╰┈➤ 👨‍💻 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ @{OWNER_USERNAME}"
-                                )
-                                cl.direct_send(adult_msg, thread_ids=[thread_id])
-                                continue
+                    // --- 3. REELS BLOCKER ---
+                    if (itemType === 'clip' || (itemType === 'media' && lastItem.media?.media_type === 2) || text.includes('/reel/')) {
+                        const reelMsg = `🚫🎬 𝗥𝗘𝗘𝗟𝗦 𝗡𝗢𝗧 𝗔𝗟𝗟𝗢𝗪𝗘𝗗!\n\n👤 @USER\n\n⚠️ 𝗥𝗘𝗘𝗟𝗦 / 𝗩𝗜𝗗𝗘𝗢𝗦 𝗔𝗥𝗘 𝗡𝗢𝗧 𝗔𝗟𝗟𝗢𝗪𝗘𝗗 𝗛𝗘𝗥𝗘.\n\n🛑 𝗣𝗟𝗘𝗔𝗦𝗘 𝗗𝗢𝗡'𝗧 𝗥𝗘𝗣𝗘𝗔𝗧!\n\n👑 𝗔𝗗𝗠𝗜𝗡𝗦 ➜ ${adminTags}\n\n🤖 𝗕𝗢𝗧 ➜ @bot222703\n╰┈➤ 👨‍💻 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ @fx_smw`;
+                        await directThread.broadcastText(reelMsg);
+                        console.log("[ACTION] Sent Reels Block Alert!");
+                        continue;
+                    }
 
-                        # 4. COMMANDS LISTEN (KICK, STATUS, HELP)
-                        if bot_tag in text:
-                            if gc_admins and sender_id not in gc_admins:
-                                cl.direct_send(
-                                    f"⚠️ Access Denied! Only Group Admins can execute commands.\n👑 Owner: @{OWNER_USERNAME}",
-                                    thread_ids=[thread_id]
-                                )
-                                continue
+                    // --- 4. 18+ CONTENT ---
+                    const restrictedWords = ['18+', 'adult', 'sex', 'xxx', 'porn', 'nude', 'gali'];
+                    if (restrictedWords.some(word => text.toLowerCase().includes(word))) {
+                        const adultMsg = `🚨🛡️ 𝗠𝗢𝗗𝗘𝗥𝗔𝗧𝗜𝗢𝗡 𝗔𝗟𝗘𝗥𝗧!\n\n👤 𝗨𝗦𝗘𝗥 ➜ @USER\n🔞 𝟭𝟴+ / 𝗔𝗚𝗘-𝗥𝗘𝗦𝗧𝗥𝗜𝗖𝗧𝗘𝗗 𝗖𝗢𝗡𝗧𝗘𝗡𝗧 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!\n\n⚠️ 𝗨𝗡𝗔𝗣𝗣𝗥𝗢𝗣𝗥𝗜𝗔𝗧𝗘 𝗖𝗢𝗡𝗧𝗘𝗡𝗧 𝗜𝗦 𝗡𝗢𝗧 𝗔𝗟𝗟𝗢𝗪𝗘𝗗 𝗜𝗡 𝗧𝗛𝗜𝗦 𝗚𝗖.\n🗑️ 𝗣𝗟𝗘𝗔𝗦𝗘 𝗥𝗘𝗩𝗜𝗘𝗪 & 𝗥𝗘𝗠𝗢𝗩𝗘 𝗧𝗛𝗘 𝗖𝗢𝗡𝗧𝗘𝗡𝗧.\n\n👑 𝗔𝗗𝗠𝗜𝗡𝗦 ➜ ${adminTags}\n\n╰┈➤ 🤖 𝗕𝗢𝗧 ➜ @bot222703\n╰┈➤ 👨‍💻 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ @fx_smw`;
+                        await directThread.broadcastText(adultMsg);
+                        console.log("[ACTION] Sent 18+ Content Alert!");
+                        continue;
+                    }
+                }
+            } catch (err) {
+                console.error("[ERROR in loop]:", err.message);
+            }
+        }, 3000);
 
-                            if "kick" in text or "remove" in text:
-                                target_user = None
-                                for part in text.split():
-                                    if part.startswith("@") and part != bot_tag:
-                                        target_user = part.replace("@", "")
-                                        break
+        setInterval(() => {
+            console.log("Bot heartbeat: Running and listening...");
+        }, 60000);
 
-                                if target_user:
-                                    for u in thread.users:
-                                        if u.username.lower() == target_user.lower():
-                                            try:
-                                                cl.direct_thread_remove_user(thread_id, u.pk)
-                                                kick_card = (
-                                                    f"🚫 @{u.username} HAS BEEN KICKED OUT FROM THE GC!\n\n"
-                                                    f"👑 Admin Action By Order | Owner: @{OWNER_USERNAME}"
-                                                )
-                                                cl.direct_send(kick_card, thread_ids=[thread_id])
-                                            except Exception:
-                                                cl.direct_send(f"❌ Execution Failed: Make sure Bot is Group Admin.", thread_ids=[thread_id])
+    } catch (error) {
+        console.error("LOGIN FAILED:", error.message);
+    }
+}
 
-                            elif "status" in text or "ping" in text:
-                                status_card = (
-                                    f"⚡ BOT STATUS: ONLINE (ULTRA MODE)\n"
-                                    f"───────────────\n"
-                                    f"🟢 System: Fully Operational\n"
-                                    f"🛡️ Security: Active\n\n"
-                                    f"👑 Owner: @{OWNER_USERNAME}"
-                                )
-                                cl.direct_send(status_card, thread_ids=[thread_id])
-
-                            elif "help" in text:
-                                help_card = (
-                                    f"⚙️ ADMIN COMMANDS\n"
-                                    f"───────────────\n"
-                                    f"▫️ `@{BOT_USERNAME} kick @user` - Remove member\n"
-                                    f"▫️ `@{BOT_USERNAME} status` - Check bot status\n"
-                                    f"▫️ `@{BOT_USERNAME} help` - Show this menu\n\n"
-                                    f"👑 Owner: @{OWNER_USERNAME}"
-                                )
-                                cl.direct_send(help_card, thread_ids=[thread_id])
-
-        except Exception as e:
-            print(f"[ERROR] {e}")
-
-        time.sleep(3)  # 3 सेकंड का सुपर-फास्ट स्कैनिंग लूप
-
-
-
+startBot();
 
