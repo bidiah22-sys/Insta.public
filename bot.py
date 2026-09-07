@@ -1,9 +1,9 @@
+
 import os
 from flask import Flask, request
 
 app = Flask(__name__)
 
-# Railway के वेरिएबल से टोकन उठाएगा, अगर नहीं मिला तो 'Instagram 123' ले लेगा
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "Instagram 123")
 
 @app.route("/", methods=["GET"])
@@ -13,7 +13,6 @@ def home():
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
-        # Meta Handshake Verification
         mode = request.args.get("hub.mode")
         token = request.args.get("hub.verify_token")
         challenge = request.args.get("hub.challenge")
@@ -28,7 +27,6 @@ def webhook():
         return "Hello World", 200
 
     elif request.method == "POST":
-        # Incoming Messages/Events from Instagram
         data = request.json
         print("Incoming Webhook Data:", data)
         return "EVENT_RECEIVED", 200
