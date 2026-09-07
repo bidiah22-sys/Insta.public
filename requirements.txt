@@ -1,1 +1,3 @@
-instagrapi==2.18.18
+flask
+requests
+
