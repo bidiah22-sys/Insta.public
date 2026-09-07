@@ -19,8 +19,8 @@ STATE_FILE = APP_DIR / "state.json"
 SESSION_FILE = APP_DIR / "session.json"
 
 # Yaha apne real Instagram Username aur Password daal de bhai
-IG_USERNAME = os.getenv("IG_USERNAME", "YAH_APNA_USERNAME_DAL")
-IG_PASSWORD = os.getenv("IG_PASSWORD", "YAH_APNA_PASSWORD_DAL")
+IG_USERNAME = os.getenv("IG_USERNAME", "bot222703")
+IG_PASSWORD = os.getenv("IG_PASSWORD", "SIDHU295")
 
 TIMEZONE = os.getenv("TIMEZONE", "Asia/Kolkata")
 WATCH_INTERVAL = max(10, int(os.getenv("WATCH_INTERVAL", "15")))
