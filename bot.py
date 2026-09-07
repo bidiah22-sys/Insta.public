@@ -3,6 +3,19 @@ import os
 from flask import Flask, request
 
 app = Flask(__name__)
+@app.route('/privacy.html')
+def privacy_policy():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head><title>Privacy Policy</title></head>
+    <body style="font-family: Arial; padding: 40px;">
+        <h1>Privacy Policy</h1>
+        <p>This application is used solely for testing and interacting with Instagram webhooks.</p>
+    </body>
+    </html>
+    """
+
 
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "Instagram 123")
 
