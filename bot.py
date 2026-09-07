@@ -17,7 +17,8 @@ def privacy_policy():
     """
 
 
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "Instagram 123")
+VERIFY_TOKEN = "Instagram 123"
+
 
 @app.route("/", methods=["GET"])
 def home():
