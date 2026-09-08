@@ -8,7 +8,7 @@ from instagrapi import Client
 # ==========================================
 BOT_USERNAME = os.getenv("BOT_USERNAME") or "smw_bot0.1"
 OWNER_USERNAME = "fx_smw"
-SESSION_ID = os.getenv("IG_SESSION_ID") or "YAHAN_APNI_SESSION_ID_DAL"
+SESSION_ID = "27413581604%3AouSmyrPKPDgZ9t%3A22%3AAYjPEsJzAujJahaw35cBMkO0idvr-xouZfgBEYczYA"
 
 if not SESSION_ID or SESSION_ID == "YAHAN_APNI_SESSION_ID_DAL":
     raise RuntimeError("Critical Error: Instagram Session ID is missing!")
