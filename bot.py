@@ -17,9 +17,9 @@ logger = logging.getLogger("SMW_AUTOKICK_STRICT")
 # ==========================================
 # CONFIGURATION
 # ==========================================
-BOT_USERNAME = os.getenv("BOT_USERNAME", "bot222703")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "smw_bot0.1")
 OWNER_USERNAME = "fx_smw"
-SESSION_ID = os.getenv("IG_SESSION_ID") or "YAHAN_APNI_SESSION_ID_DAL"
+SESSION_ID = "27413581604%3AouSmyrPKPDgZ9t%3A22%3AAYjPEsJzAujJahaw35cBMkO0idvr-xouZfgBEYczYA"
 POLL_INTERVAL = 6
 
 if not SESSION_ID or SESSION_ID == "YAHAN_APNI_SESSION_ID_DAL":
