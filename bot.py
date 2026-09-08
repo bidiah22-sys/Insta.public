@@ -20,7 +20,7 @@ OWNER_USERNAME = os.getenv("OWNER_USERNAME") or "fx_smw"
 
 # Session ID Railway Variable से लेना बेहतर है.
 # Code में अपना real session ID public मत डालना.
-SESSION_ID = os.getenv("IG_SESSION_ID") or "27413581604%3A91cVN5zOMUK05d%3A5%3AAYhafaXxMTZ1DIBd5DyT1RiuLCVGMmbf0qQbSjOINA"
+SESSION_ID = "27413581604%3A91cVN5zOMUK05d%3A5%3AAYhafaXxMTZ1DIBd5DyT1RiuLCVGMmbf0qQbSjOINA"
 
 TIMEZONE = "Asia/Kolkata"
 TZ = ZoneInfo(TIMEZONE)
