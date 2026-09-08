@@ -14,13 +14,13 @@ from instagrapi import Client
 # CONFIG
 # ============================================================
 
-BOT_USERNAME = os.getenv("BOT_USERNAME", "bot222703").lstrip("@").strip()
+BOT_USERNAME = os.getenv("BOT_USERNAME", "smw_bot0.1").lstrip("@").strip()
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "fx_smw").lstrip("@").strip()
 
 # IMPORTANT:
 # Put your Instagram session ID in the environment variable:
 # IG_SESSION_ID
-SESSION_ID = os.getenv("IG_SESSION_ID", "").strip()
+SESSION_ID = ("27413581604%3A91cVN5zOMUK05d%3A5%3AAYhafaXxMTZ1DIBd5DyT1RiuLCVGMmbf0qQbSjOINA").strip()
 
 STATE_FILE = Path(
     os.getenv("BOT_STATE_FILE", "gc_bot_state.json")
