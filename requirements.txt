@@ -1,3 +1,4 @@
 instagrapi
-apscheduler
-
+pydantic
+requests
+Pillow
