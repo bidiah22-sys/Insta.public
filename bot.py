@@ -7,13 +7,13 @@ from instagrapi import Client
 # CONFIG
 # =========================
 
-BOT_USERNAME = os.getenv("BOT_USERNAME", "bot222703")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "smw_bot0.1")
 OWNER_USERNAME = "fx_smw"
 
 # ==========================================
 # यहाँ अपनी लैपटॉप से निकाली हुई Session ID डाल
 # ==========================================
-SESSION_ID = os.getenv("IG_SESSION_ID") or "YAHAN_APNI_SESSION_ID_DAL"
+SESSION_ID = "27413581604%3A91cVN5zOMUK05d%3A5%3AAYhafaXxMTZ1DIBd5DyT1RiuLCVGMmbf0qQbSjOINA"
 
 POLL_INTERVAL = 5
 
@@ -560,7 +560,7 @@ def start_bot():
                 f"[-] RECONNECTING... {e}"
             )
 
-            time.sleep(15)
+            time.sleep(5)
 
 
 if __name__ == "__main__":
