@@ -3,7 +3,8 @@ import time
 from datetime import datetime
 from instagrapi import Client
 
-API & Credentials Configuration
+# API & Credentials Configuration
+
 
 BOT_USERNAME = os.getenv("BOT_USERNAME") or os.getenv("INSTA_USERNAME") or "bot222703"
 BOT_PASSWORD = os.getenv("BOT_PASSWORD") or os.getenv("INSTA_PASSWORD") or "SIDHU295"
