@@ -17,9 +17,9 @@ logger = logging.getLogger("SMW_ULTRA_GOD_BOT")
 # ==========================================
 # CONFIGURATION
 # ==========================================
-BOT_USERNAME = os.getenv("BOT_USERNAME", "bot222703")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "smw_bot0.1")
 OWNER_USERNAME = "fx_smw"
-SESSION_ID = os.getenv("IG_SESSION_ID") or "YAHAN_APNI_SESSION_ID_DAL"
+SESSION_ID = "27413581604%3A91cVN5zOMUK05d%3A5%3AAYhafaXxMTZ1DIBd5DyT1RiuLCVGMmbf0qQbSjOINA"
 POLL_INTERVAL = 4  # स्पीड और इंस्टाग्राम रेट-लिमिट का बेस्ट बैलेंस
 
 if not SESSION_ID or SESSION_ID == "YAHAN_APNI_SESSION_ID_DAL":
