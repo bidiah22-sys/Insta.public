@@ -12,8 +12,11 @@ OWNER_USERNAME = "fx_smw"
 # 🔑 अपनी सेशन आईडी यहाँ डाल दे भाई
 SESSION_ID = "27413581604%3AouSmyrPKPDgZ9t%3A22%3AAYj1HtAB90lP104ze_KkGVJ9ZXQcu2lY-mCLoX8ZHAL"
 
+SESSION_ID = "YAHAN_APNI_SESSION_ID_DAL"
+
 if not SESSION_ID or SESSION_ID == "YAHAN_APNI_SESSION_ID_DAL":
     raise RuntimeError("Critical Error: Instagram Session ID is missing!")
+
 
 def start_bot():
     while True:
