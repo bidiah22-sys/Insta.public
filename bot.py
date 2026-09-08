@@ -10,7 +10,7 @@ OWNER_USERNAME = "fx_smw"
 # ==========================================
 # यहाँ अपनी लैपटॉप से निकाली हुई Session ID डाल
 # ==========================================
-SESSION_ID = "YAHAN_APNI_SESSION_ID_DAL"
+SESSION_ID = "27413581604%3A91cVN5zOMUK05d%3A5%3AAYhafaXxMTZ1DIBd5DyT1RiuLCVGMmbf0qQbSjOINA"
 
 def start_bot():
     while True:
