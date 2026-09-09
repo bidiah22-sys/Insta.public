@@ -7,7 +7,7 @@ from instagrapi import Client
 # ⚙️ ULTRA PRO CONFIGURATION (SESSION ID)
 # ==========================================
 BOT_USERNAME = os.getenv("BOT_USERNAME") or "GHEE KHTMA HAI VIROO"
-OWNER_USERNAME = "fx_smw"
+OWNER_USERNAME = "arhanali_06 & @rehaxn11"
 
 # 🔑 अपनी सेशन आईडी यहाँ डाल दे भाई
 SESSION_ID = "67689365007%3ArMwOlX83z4ytk1%3A18%3AAYgfZH_xDkmcwmNRNctQwQhrEzFB473yxe-wtBgKUQ"
@@ -216,7 +216,7 @@ def start_bot():
 
         except Exception as outer_e:  
             print(f"[-] RECONNECTING... Error: {outer_e}")  
-            time.sleep(20)
+            time.sleep(6)
 
 if __name__ == "__main__":
     start_bot()
