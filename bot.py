@@ -6,7 +6,7 @@ from instagrapi import Client
 # ==========================================
 # ⚙️ ULTRA PRO CONFIGURATION (SESSION ID)
 # ==========================================
-BOT_USERNAME = os.getenv("BOT_USERNAME") or "bot222703"
+BOT_USERNAME = os.getenv("BOT_USERNAME") or "GHEE KHTMA HAI VIROO"
 OWNER_USERNAME = "fx_smw"
 
 # 🔑 अपनी सेशन आईडी यहाँ डाल दे भाई
