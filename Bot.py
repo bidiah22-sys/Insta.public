@@ -9,7 +9,7 @@ from instagrapi import Client
 # CONFIG
 # ============================================================
 
-SESSION_ID = os.getenv("INSTA_SESSION_ID") or "YAHAN_APNI_SESSION_ID_PASTE_KAREIN"
+SESSION_ID = "67689365007%3ArMwOlX83z4ytk1%3A18%3AAYhKN_qvfDT4KUMtuWF3aPD1Ppz5PmELC3IT4g8TVw"
 
 BOT_USERNAME = "bot222703"
 OWNER_USERNAME = "fx_smw"
