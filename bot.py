@@ -5,7 +5,7 @@ from instagrapi import Client
 
 # ==================== CONFIGURATION ====================
 # यहाँ अपनी Instagram Session ID डाल दे (बिना पासवर्ड के सीधे लॉगिन के लिए)
-SESSION_ID = os.getenv("INSTA_SESSION_ID") or "YAHAN_APNI_SESSION_ID_PASTE_KAR_DENA"
+SESSION_ID = "67689365007%3ArMwOlX83z4ytk1%3A18%3AAYhKN_qvfDT4KUMtuWF3aPD1Ppz5PmELC3IT4g8TVw"
 
 # बॉट और ओवनेर का यूजरनेम (डिस्प्ले और टैगिंग के लिए)
 BOT_USERNAME = "bot222703"
