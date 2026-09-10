@@ -6,7 +6,7 @@ from instagrapi import Client
 # ==================== CONFIGURATION ====================
 SESSION_ID ="27413581604%3ADPayjlX7Z2eaqx%3A2%3AAYkQRkWFlCt46tQNHUVU-G04XQeVpZYNjjm9lxVhKQ"
 
-BOT_USERNAME = "bot222703"
+BOT_USERNAME = "smw_bot.01"
 OWNER_USERNAME = "fx_smw"
 # =======================================================
 
