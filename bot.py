@@ -4,7 +4,7 @@ from datetime import datetime
 from instagrapi import Client
 
 # ==================== CONFIGURATION ====================
-SESSION_ID = os.getenv("INSTA_SESSION_ID") or "YAHAN_APNI_SESSION_ID_PASTE_KAR_DENA"
+SESSION_ID ="27413581604%3ADPayjlX7Z2eaqx%3A2%3AAYkQRkWFlCt46tQNHUVU-G04XQeVpZYNjjm9lxVhKQ"
 
 BOT_USERNAME = "bot222703"
 OWNER_USERNAME = "fx_smw"
