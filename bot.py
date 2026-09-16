@@ -5,7 +5,7 @@ from instagrapi import Client
 from instagrapi.exceptions import LoginRequired, ChallengeRequired
 
 # ==================== CONFIGURATION ====================
-SESSION_ID = os.getenv("INSTA_SESSION_ID") or "YAHAN_APNI_SESSION_ID_PASTE_KAR_DENA"
+SESSION_ID = "7207590267%3A0QpUpraqt4dWWn%3A6%3AAYmbdGY6kWOw5x0oYZJaGw3z96Ua_YgL5a7y0ikorA"
 
 BOT_USERNAME = "bot222703" # अपना बोट यूजरनेम यहाँ डालें
 OWNER_USERNAME = "fx_smw"
