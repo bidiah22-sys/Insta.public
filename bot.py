@@ -4,10 +4,10 @@ from datetime import datetime
 from instagrapi import Client
 
 # ==================== CONFIGURATION ====================
-SESSION_ID ="27413581604%3ADPayjlX7Z2eaqx%3A2%3AAYkQRkWFlCt46tQNHUVU-G04XQeVpZYNjjm9lxVhKQ"
+SESSION_ID ="7207590267%3ARlGWBdOyJH1g9g%3A3%3AAYkHt88-hxfpVxC82fyXq2bHE3709W2QJ7kkdhjyLg"
 
 BOT_USERNAME = "smw_bot.01"
-OWNER_USERNAME = "fx_smw"
+OWNER_USERNAME = "fx_smw & aat_nnk25"
 # =======================================================
 
 def start_bot():
