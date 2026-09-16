@@ -5,10 +5,10 @@ from instagrapi import Client
 from instagrapi.exceptions import LoginRequired, ChallengeRequired
 
 # ==================== CONFIGURATION ====================
-SESSION_ID = os.getenv("INSTA_SESSION_ID") or "YAHAN_APNI_SESSION_ID_PASTE_KAR_DENA"
+SESSION_ID = "7207590267%3AOzEdEpuYJTJj6t%3A20%3AAYkMaEgKhgBcicgwWniTeXrUH-O3FDT_4s5sepDRtQ"
 
 BOT_USERNAME = "smw_vyron_bot" # अपना बोट यूजरनेम यहाँ डालें
-OWNER_USERNAME = "fx_smw & aat_nnk25"
+OWNER_USERNAME = "fx_smw ❤️ aat_nnk25"
 
 # कॉल रिमाइंडर का समय: 1 घंटा (3600 सेकंड)
 CALL_REMINDER_INTERVAL = 3600 
