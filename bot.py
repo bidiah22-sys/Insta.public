@@ -19,8 +19,7 @@ BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
 
 # AUTHORIZED DEVELOPERS / OWNERS
 OWNER_1 = "fx_smw ✘ aat_nnk25"
-OWNER_2 = "aat_nnk"
-AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "aat_nnk25", "fx_smw ✘ aat_nnk25"]
+AUTHORIZED_DEVS = ["fx_smw", "aat_nnk25"]
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 CALL_REMINDER_INTERVAL = int(os.getenv("CALL_REMINDER_INTERVAL", 3600))
