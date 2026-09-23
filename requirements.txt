@@ -1,4 +1,4 @@
 instagrapi
-pydantic
-requests
-Pillow
+sqlalchemy
+python-dotenv
+psutil
