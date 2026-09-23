@@ -14,13 +14,13 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 load_dotenv()
 
 # ==================== CONFIGURATION ====================
-SESSION_ID = os.getenv("SESSION_ID", "7207590267%3AOzEdEpuYJTJj6t%3A20%3AAYkMaEgKhgBcicgwWniTeXrUH-O3FDT_4s5sepDRtQ")
+SESSION_ID = ( "28257191991%3AvxV97XEC7K9nuY%3A14%3AAYkZ5KL7ABrhgdT03Iyd3EzRSkQD5NfYEhcb-BT9OQ")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "smw_vyron_bot")
 
 # AUTHORIZED DEVELOPERS / OWNERS
 OWNER_1 = "fx_smw"
-OWNER_2 = "aat_nnk"
-AUTHORIZED_DEVS = ["fx_smw", "aat_nnk"]
+OWNER_2 = "aat_nnk25"
+AUTHORIZED_DEVS = ["fx_smw", "aat_nnk25"]
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 CALL_REMINDER_INTERVAL = int(os.getenv("CALL_REMINDER_INTERVAL", 3600))
