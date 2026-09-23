@@ -13,7 +13,7 @@ load_dotenv()
 
 # ==================== CONFIGURATION ====================
 # आप चाहें तो सीधे यहाँ मान बदल सकते हैं या .env का उपयोग कर सकते हैं
-SESSION_ID = ("28257191991%3AvlOZLI1xVdxoxV%3A12%3AAYlLtf2Y6rSCvTGD-sArO_pKTEoR04E_KdDaJ08_BQ")
+SESSION_ID = ("28257191991%3Aks877eC7dWCWXv%3A23%3AAYl0pWGvJrvI4-4ZuzWZCC7npZWUdBwQsYpllCEzmg")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "smw_vyron_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "fx_smw ✘ aat_nnk25")
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
