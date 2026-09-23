@@ -12,7 +12,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 load_dotenv()
 
 # ==================== CONFIGURATION ====================
-SESSION_ID = os.getenv("SESSION_ID", "7207590267%3AOzEdEpuYJTJj6t%3A20%3AAYkMaEgKhgBcicgwWniTeXrUH-O3FDT_4s5sepDRtQ")
+SESSION_ID = ("28257191991%3Aks877eC7dWCWXv%3A23%3AAYl0pWGvJrvI4-4ZuzWZCC7npZWUdBwQsYpllCEzmg")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "smw_vyron_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "fx_smw ✘ aat_nnk25")
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
