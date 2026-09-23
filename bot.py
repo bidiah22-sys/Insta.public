@@ -14,7 +14,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 load_dotenv()
 
 # ==================== CONFIGURATION ====================
-SESSION_ID = ("28257191991%3AaPUxA4L8RfNfv1%3A16%3AAYm4gzvPAgGijIVUze3dFPu7JcrVNH473kUjEEWUKQ")
+SESSION_ID = ("28257191991%3AvxV97XEC7K9nuY%3A14%3AAYkZ5KL7ABrhgdT03Iyd3EzRSkQD5NfYEhcb-BT9OQ")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
 
 # AUTHORIZED DEVELOPERS / OWNERS
