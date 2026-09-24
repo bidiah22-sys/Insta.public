@@ -11,11 +11,11 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 load_dotenv()
 
 # ==================== CONFIGURATION ====================
-SESSION_ID = os.getenv("SESSION_ID", "7207590267%3AOzEdEpuYJTJj6t%3A20%3AAYkMaEgKhgBcicgwWniTeXrUH-O3FDT_4s5sepDRtQ")
-BOT_USERNAME = os.getenv("BOT_USERNAME", "smw_vyron_bot")
-OWNER_USERNAME = os.getenv("OWNER_USERNAME", "fx_smw ✘ aat_nnk25")
+SESSION_ID = ( "28257191991%3AaNrW484iYFrKlk%3A4%3AAYlJ66wiCNowmolJUs46AX9zrm2WM69gIKunfmHjCA")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
+OWNER_USERNAME = os.getenv("OWNER_USERNAME", "fx_smw" ✘ "aat_nnk25")
 
-AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "aat_nnk25"]
+AUTHORIZED_DEVS = ["fx_smw", "aat_nnk25"]
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", 2))
