@@ -12,7 +12,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 load_dotenv()
 
 # ==================== CONFIGURATION (FROM RAILWAY ENVIRONMENT VARIABLES) ====================
-SESSION_ID = os.getenv("SESSION_ID", "")
+SESSION_ID = os.getenv("SESSION_ID", "28257191991%3AhNvGpKqnzo6qRL%3A5%3AAYkycEpChM6TAA_ckLcYlXcbCDtm5o6sXEmqYUgwJQ")
 PROXY_URL = os.getenv("PROXY_URL", None)  # Safe fallback if PROXY_URL is deleted
 BOT_USERNAME = os.getenv("BOT_USERNAME", "smw_vyron_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "fx_smw ✘ aat_nnk25")
