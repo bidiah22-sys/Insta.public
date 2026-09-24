@@ -13,7 +13,7 @@ load_dotenv()
 # ==================== CONFIGURATION ====================
 SESSION_ID = ( "28257191991%3AXkxM8kUs2lBMhz%3A15%3AAYnoWpLKr5t_miN6pDVnAGIf1WQ-Vu5ymzMrIsVsUA")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "smw_vyron_bot")
-OWNER_USERNAME = os.getenv("OWNER_USERNAME", "fx_smw ✘ aat_nnk25")
+OWNER_USERNAME = os.getenv("OWNER_USERNAME", "fx_smw ✘ @aat_nnk25")
 
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "aat_nnk25"]
 
