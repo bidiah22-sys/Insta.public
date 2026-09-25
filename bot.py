@@ -11,11 +11,11 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 load_dotenv()
 
 # --- यहाँ अपनी डिटेल्स सेट कर दी गई हैं ---
-BOT_USERNAME = "bot.0928"
+BOT_USERNAME = "bot0.0928"
 BOT_PASSWORD = "SIDHU295"
 
 # अपनी सेशन आईडी यहाँ सीधे स्ट्रिंग में पेस्ट कर देना भाई
-SESSION_ID = "YOUR_SESSION_ID_HERE" 
+SESSION_ID = "24360649417%3AdvTl2cIVjUGYKS%3A7%3AAYlLz9DoDZNK9nOVVQpgGsoTS6bkcCp5wISgktflKg" 
 
 OWNER_USERNAME = "fx_smw ✘ aat_nnk25"
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "aat_nnk25", "fx_sw"]
