@@ -15,7 +15,7 @@ BOT_USERNAME = "bot0.0928"
 BOT_PASSWORD = "SIDHU295"
 
 # अपनी सेशन आईडी यहाँ सीधे स्ट्रिंग में पेस्ट कर देना भाई
-SESSION_ID = "24360649417%3AdvTl2cIVjUGYKS%3A7%3AAYlLz9DoDZNK9nOVVQpgGsoTS6bkcCp5wISgktflKg" 
+SESSION_ID = "24360649417%3AHPDriDaoaswo78%3A24%3AAYlhBfzizC-sEzv9egYW3wr7vS6Ha1iFhI_tfzYTIg" 
 
 OWNER_USERNAME = "@fx_smw ✘ @aat_nnk25"
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "aat_nnk25", "fx_sw"]
