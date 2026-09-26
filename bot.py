@@ -13,7 +13,7 @@ load_dotenv()
 # --- Credentials & Config ---
 BOT_USERNAME = "bot0.0928"
 BOT_PASSWORD = "SIDHU295"
-SESSION_ID = "24360649417%3AdvTl2cIVjUGYKS%3A7%3AAYlLz9DoDZNK9nOVVQpgGsoTS6bkcCp5wISgktflKg" 
+SESSION_ID = "24360649417%3AvRVfBhx2zv7DT5%3A7%3AAYn9ArgOOM8UXnSdmdTLzUaS11Rvk5vfce-QeB32Vw" 
 
 OWNER_USERNAME = "fx_smw ✘ aat_nnk25"
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "aat_nnk25", "fx_sw"]
