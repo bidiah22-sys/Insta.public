@@ -32,9 +32,9 @@ def run_flask():
     app.run(host="0.0.0.0", port=port)
 
 
-BOT_USERNAME = "YOUR_BOT_USERNAME"
+BOT_USERNAME = "pookiee_bot2.0"
 # Paste your Session ID only in this private copy. Do NOT publish it to GitHub.
-SESSION_ID = "PASTE_YOUR_SESSION_ID_HERE"
+SESSION_ID = "24360649417%3Al8H6KwVVrgUj2I%3A25%3AAYnJJYs5tS3P2DC2-3lUCA9OBTIvaQlp8A5bjbQbrA"
 
 # ONLY these two developers can execute commands.
 OWNER_USERNAME = "@fx_smw  ✦  @aat_nnk25"
