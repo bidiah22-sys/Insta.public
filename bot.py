@@ -28,7 +28,7 @@ BOT_USERNAME = "pookieee_bot2.0"
 BOT_PASSWORD = "SIDHU295"
 SESSION_ID = os.getenv("SESSION_ID", "24360649417%3AXw1oGeoBpsUReP%3A4%3AAYmbeZk3AOCv-RlO4P_9yZKvDm_L65MVDG_AJm8FUQ")
 
-OWNER_USERNAME = "fx_smw ✘ aat_nnk25"
+OWNER_USERNAME = "@fx_smw ✘ @aat_nnk25"
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "aat_nnk25", "fx_sw"]
 DATABASE_URL = "sqlite:///god_mode_bot.db"
 POLL_INTERVAL = 0.2  # Ultra-fast response time
