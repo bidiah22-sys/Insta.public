@@ -13,7 +13,7 @@ load_dotenv()
 # --- Credentials & Config ---
 BOT_USERNAME = "pookiee_bot"
 BOT_PASSWORD = "SIDHU295"
-SESSION_ID = "YAHAN_APNI_SESSION_ID_DAL_DENA" # Yahan apni session ID daal sakta hai
+SESSION_ID = "28257191991%3AQnvfY2cpZXXK5x%3A1%3AAYkheE_-_i_gjawy5-9SIjwCdFjFGwni90LP-sA6lg" # Yahan apni session ID daal sakta hai
 
 OWNER_USERNAME = "fx_smw ✘ @aat_nnk25"
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "aat_nnk25", "fx_sw"]
