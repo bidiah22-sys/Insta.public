@@ -26,7 +26,7 @@ def run_flask():
 # --- Credentials & Config ---
 BOT_USERNAME = "pookieee_bot"
 BOT_PASSWORD = "SIDHU295"
-SESSION_ID = os.getenv("SESSION_ID", "YAHAN_APNI_SESSION_ID_DAL_DENA")
+SESSION_ID = os.getenv("SESSION_ID", "24360649417%3AXw1oGeoBpsUReP%3A4%3AAYmbeZk3AOCv-RlO4P_9yZKvDm_L65MVDG_AJm8FUQ")
 
 OWNER_USERNAME = "fx_smw ✘ aat_nnk25"
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "aat_nnk25", "fx_sw"]
