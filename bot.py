@@ -24,7 +24,7 @@ def run_flask():
     app.run(host="0.0.0.0", port=port)
 
 # --- Credentials & Config ---
-BOT_USERNAME = "pookieee_bot"
+BOT_USERNAME = "pookieee_bot2.0"
 BOT_PASSWORD = "SIDHU295"
 SESSION_ID = os.getenv("SESSION_ID", "24360649417%3AXw1oGeoBpsUReP%3A4%3AAYmbeZk3AOCv-RlO4P_9yZKvDm_L65MVDG_AJm8FUQ")
 
