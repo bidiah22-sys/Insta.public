@@ -27,7 +27,7 @@ SESSION_ID = "24360649417%3AQzPy7AwSResLGt%3A8%3AAYkWqHIfi96k5QDT1hfoTouRly-xUd5
 OWNER_USERNAME = "fx_smw ✘ aat_nnk25"
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "aat_nnk25", "fx_sw"]
 DATABASE_URL = "sqlite:///bot_database.db"
-POLL_INTERVAL = 20
+POLL_INTERVAL = 1
 
 SHADOWBANNED_USERS = set()
 TARGETED_USERS = set()
