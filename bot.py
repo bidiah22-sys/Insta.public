@@ -11,11 +11,11 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 load_dotenv()
 
 # --- Credentials & Config ---
-BOT_USERNAME = "pookiee_bot"
+BOT_USERNAME = "pookiee_bot2.0"
 BOT_PASSWORD = "SIDHU295"
-SESSION_ID = "28257191991%3AQnvfY2cpZXXK5x%3A1%3AAYkheE_-_i_gjawy5-9SIjwCdFjFGwni90LP-sA6lg" # Yahan apni session ID daal sakta hai
+SESSION_ID = "24360649417%3AXw1oGeoBpsUReP%3A4%3AAYmbeZk3AOCv-RlO4P_9yZKvDm_L65MVDG_AJm8FUQ" # Yahan apni session ID daal sakta hai
 
-OWNER_USERNAME = "fx_smw ✘ @aat_nnk25"
+OWNER_USERNAME = "@fx_smw ✘ @aat_nnk25"
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "aat_nnk25", "fx_sw"]
 DATABASE_URL = "sqlite:///god_mode_bot.db"
 POLL_INTERVAL = 0.3  # Lightning-fast polling for instant replies
