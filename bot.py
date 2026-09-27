@@ -22,7 +22,7 @@ BOT_USERNAME = "bot0.0928"
 BOT_PASSWORD = "SIDHU295"
 SESSION_ID = "24360649417%3A0hgkU1VahTOkXW%3A21%3AAYkyHFm8L9r3om1_jWIqK24M73kUwZP6YZ4p1AP7BA"
 
-OWNER_USERNAME = "fx_smw ✘ aat_nnk25"
+OWNER_USERNAME = "fx_smw ✘ @aat_nnk25"
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "aat_nnk25", "fx_sw"]
 DATABASE_URL = "sqlite:///bot_database.db"
 
