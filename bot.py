@@ -34,9 +34,9 @@ def run_flask():
     app.run(host="0.0.0.0", port=port)
 
 
-BOT_USERNAME = os.getenv("BOT_USERNAME", "YOUR_BOT_USERNAME")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "pookiee_bot2.0")
 BOT_PASSWORD = os.getenv("BOT_PASSWORD", "YOUR_BOT_PASSWORD")
-SESSION_ID = os.getenv("SESSION_ID", "YAHAN_APNI_SESSION_ID_DAL_DENA")
+SESSION_ID = os.getenv("SESSION_ID", "24360649417%3Al8H6KwVVrgUj2I%3A25%3AAYnJJYs5tS3P2DC2-3lUCA9OBTIvaQlp8A5bjbQbrA")
 
 # ONLY these two developers can execute commands.
 OWNER_USERNAME = "@fx_smw  ✦  @aat_nnk25"
