@@ -20,7 +20,7 @@ load_dotenv()
 # --- यहाँ अपनी डिटेल्स सेट करें ---
 BOT_USERNAME = "bot0.0928"
 BOT_PASSWORD = "SIDHU295"
-SESSION_ID = "YAHAN_APNI_SESSION_ID_DAL_DENA"
+SESSION_ID = "24360649417%3A0hgkU1VahTOkXW%3A21%3AAYmCT3ObS_iceC23KEPT6EmDGoV5XiWWJVQP91l4wA"
 
 OWNER_USERNAME = "fx_smw ✘ aat_nnk25"
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk25", "aat_nnk25", "fx_sw"]
