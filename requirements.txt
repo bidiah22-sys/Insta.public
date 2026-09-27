@@ -1,4 +1,4 @@
 instagrapi
-sqlalchemy
 python-dotenv
-psutil
+sqlalchemy
+flask
