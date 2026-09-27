@@ -22,7 +22,7 @@ BOT_USERNAME = "bot0.0928"
 BOT_PASSWORD = "SIDHU295"
 
 # 👇 यहाँ अपनी न्यू सेशन आईडी डाल देना भाई 👇
-SESSION_ID = "YAHAN_APNI_NEW_SESSION_ID_DAL_DENA"
+SESSION_ID = "24360649417%3AQzPy7AwSResLGt%3A8%3AAYkWqHIfi96k5QDT1hfoTouRly-xUd5B9pgsQic3LQ"
 
 OWNER_USERNAME = "fx_smw ✘ aat_nnk25"
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "aat_nnk25", "fx_sw"]
