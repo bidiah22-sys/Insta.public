@@ -19,10 +19,10 @@ load_dotenv()
 # -----------------------------------------------------------------
 # 👇 यहाँ अपनी इंस्टाग्राम की असली SESSION ID डालें 👇
 # -----------------------------------------------------------------
-INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "YOUR_SESSION_ID_HERE")
+INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "28257191991%3AfBDUWQ2snAVZwA%3A19%3AAYn_6MqQcEPy3l7HTj_TtdJfkazgNJCe7q9Z7BRcEQ")
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
-OWNER_USERNAME = os.getenv("OWNER_USERNAME", "fx_smw ✘ aat_nnk25")
+OWNER_USERNAME = os.getenv("OWNER_USERNAME", "@fx_smw ✘ @aat_nnk25")
 
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "aat_nnk25", "fx_sw"]
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
