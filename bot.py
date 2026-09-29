@@ -27,11 +27,11 @@ load_dotenv()
 # -----------------------------------------------------------------
 # 👇 यहाँ अपनी इंस्टाग्राम की असली SESSION ID डालें 👇
 # -----------------------------------------------------------------
-INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "")
+INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "67689365007%3APg9W1TfjTaIJoE%3A13%3AAYkJTZA3eLWgzjPLq2YUOvIl65o9jHVqaSyO8Y7z9w")
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "fx_smw")
-AUTHORIZED_DEVS = ["fx_smw", "aat_nnk25"]
+AUTHORIZED_DEVS = ["fx_smw", "aat_nnk25"," fittsubbu "]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 POLL_INTERVAL = max(30, int(os.getenv("POLL_INTERVAL", 45)))  # Conservative polling; does not bypass Instagram limits
