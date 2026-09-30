@@ -27,18 +27,18 @@ load_dotenv()
 # -----------------------------------------------------------------
 # 👇 यहाँ अपनी इंस्टाग्राम की असली SESSION ID डालें 👇
 # -----------------------------------------------------------------
-INSTAGRAM_SESSION_ID = "PASTE_YOUR_SESSION_ID_HERE"
+INSTAGRAM_SESSION_ID = "67689365007%3AzjPSCLZ6kw4bGz%3A10%3AAYmm05fbEyO8DYzd5jb5Bt02jRxqw9R-ls-_FAs0xA"
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-AUTHORIZED_DEVS = ["aat_nnk25"]
+AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 POLL_INTERVAL = 1  # Instant fast-reply loop interval (optimized for speed)
 AI_SMART_REPLY = True
-GEMINI_API_KEY = "PASTE_YOUR_GEMINI_API_KEY_HERE".strip()
+GEMINI_API_KEY = "AQ.Ab8RN6L-xCmt2U8G43Iwo_gVp8Otg9lskIuqO680flI0GNbEsg".strip()
 GEMINI_MODEL = "gemini-2.5-flash"
-DEVELOPER_DISPLAY = "𝗦𝗠𝗪"
+DEVELOPER_DISPLAY = "𝗦𝗠𝗪🚩"
 SAFE_MODE = os.getenv("SAFE_MODE", "1").lower() in {"1", "true", "yes", "on"}
 STARTED_AT = time.time()
 TOTAL_SEEN_MESSAGES = 0
