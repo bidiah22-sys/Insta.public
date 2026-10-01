@@ -12,7 +12,7 @@ BOT_NAME = "GC TARGET BY SMW"
 DEVELOPER = "SMW"
 
 # SESSION ID CONFIGURATION
-SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "").strip()
+SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "10291668651%3Atlp22DycYZhkIs%3A6%3AAYm32I7ZQR3u8kcB5Qt961mSyaUNCG9bMDLYGxcnRw").strip()
 
 if SESSION_ID:
     print("✅ Session credential configured")
