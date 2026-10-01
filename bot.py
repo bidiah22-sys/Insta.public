@@ -24,7 +24,7 @@ VERSION = "2.0"
 
 # Credential presence check only.
 # This test runner does not authenticate to Instagram.
-SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "").strip()
+SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "10291668651%3Atlp22DycYZhkIs%3A6%3AAYm32I7ZQR3u8kcB5Qt961mSyaUNCG9bMDLYGxcnRw").strip()
 
 INTERVAL = max(
     1,
