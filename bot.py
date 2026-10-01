@@ -25,7 +25,7 @@ load_dotenv()
 # -----------------------------------------------------------------
 # 👇 यहाँ अपनी इंस्टाग्राम की असली SESSION ID डालें 👇
 # -----------------------------------------------------------------
-INSTAGRAM_SESSION_ID = "10291668651%3AGwHe8IGUff1BQ6%3A14%3AAYkKcmZZZQpvEw9s_3jLNAt-C770hiaJSbMaUyIKVQ".strip()
+INSTAGRAM_SESSION_ID = "67689365007%3Ate1EjY4Q8ZOz6q%3A28%3AAYmPek_LToXoHD19nLbTLHCd0PsFJ83222KRdZ5PHA"
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
