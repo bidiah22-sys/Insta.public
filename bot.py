@@ -27,7 +27,7 @@ load_dotenv()
 # -----------------------------------------------------------------
 INSTAGRAM_SESSION_ID = "29013171456%3ArSu3LXtWGs24Hc%3A7%3AAYlEQ-wvWUijIZDuA5Qdw5Kpm6Uh-64kHeyPjkZxQw".strip()
 
-BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_smw")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw","aat_nnk25" , "vxf_subbu" , "rehaxn11" , "arhanali_06"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩"
