@@ -1,3 +1,4 @@
 instagrapi
-SQLAlchemy
+sqlalchemy
 python-dotenv
+google-genai
