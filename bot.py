@@ -25,7 +25,7 @@ load_dotenv()
 # -----------------------------------------------------------------
 # 👇 यहाँ अपनी इंस्टाग्राम की असली SESSION ID डालें 👇
 # -----------------------------------------------------------------
-INSTAGRAM_SESSION_ID = "PASTE_YOUR_NEW_SESSION_ID_HERE".strip()
+INSTAGRAM_SESSION_ID = "24360649417%3AmHf6yNJka0nyVL%3A5%3AAYlFjRnYRuDrod8wGk1rr8QX-bp0T8HFgtz9VkAPaw".strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
@@ -35,7 +35,6 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 POLL_INTERVAL = 1  # Instant fast-reply loop interval (optimized for speed)
 LOCAL_AUTO_REPLIES = True
 DEVELOPER_DISPLAY = "𝗦𝗠𝗪🚩"
-BOT_DISPLAY_NAME = "𝗦𝗠𝗪"
 # Paste your Gemini API key between the quotes, or set GEMINI_API_KEY in the server environment.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AQ.Ab8RN6K8dbBvbUZkEg5Juv623tva6iXTFzaSJNBStiYa0NRquA").strip()
 GEMINI_MODEL = "gemini-2.5-flash"
