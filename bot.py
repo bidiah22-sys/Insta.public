@@ -27,7 +27,7 @@ load_dotenv()
 # -----------------------------------------------------------------
 # 👇 यहाँ अपनी इंस्टाग्राम की असली SESSION ID डालें 👇
 # -----------------------------------------------------------------
-INSTAGRAM_SESSION_ID = "PASTE_YOUR_NEW_SESSION_ID_HERE".strip()
+INSTAGRAM_SESSION_ID = "24360649417%3AMyFn5xc4nFl1pK%3A10%3AAYmwR7KME6jVFwUQno7Q9tDjv3evw5ca4DZWpCZDRw".strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
@@ -35,7 +35,7 @@ AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 POLL_INTERVAL = 1  # Existing polling behavior preserved
-AI_REPLY_COOLDOWN = int(os.getenv("AI_REPLY_COOLDOWN", "20"))
+AI_REPLY_COOLDOWN = int(os.getenv("AI_REPLY_COOLDOWN", "1"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AQ.Ab8RN6K8dbBvbUZkEg5Juv623tva6iXTFzaSJNBStiYa0NRquA").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 DEAD_AFTER_DAYS = 7
