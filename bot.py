@@ -27,7 +27,7 @@ load_dotenv()
 # -----------------------------------------------------------------
 # Set your Instagram Session ID here or provide it through the environment.
 # -----------------------------------------------------------------
-INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "")
+INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "29013171456%3AT7LSqDwnSvdozK%3A29%3AAYlHaXVEpaN1HbovOzJayqm9oZlnB5sshK881WAIkg")
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_smw")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "fx_smw")
