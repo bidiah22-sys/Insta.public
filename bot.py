@@ -27,9 +27,9 @@ load_dotenv()
 # -----------------------------------------------------------------
 INSTAGRAM_SESSION_ID = "PASTE_YOUR_NEW_SESSION_ID_HERE".strip()
 
-BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "pookiee_bot2.0")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
+AUTHORIZED_DEVS = ["fx_smw","aat_nnk25" , "vxf_subbu" , "rehaxn11" , "arhanali_06"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 POLL_INTERVAL = 1  # Instant fast-reply loop interval (optimized for speed)
