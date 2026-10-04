@@ -25,11 +25,11 @@ load_dotenv()
 # -----------------------------------------------------------------
 # 👇 यहाँ अपनी इंस्टाग्राम की असली SESSION ID डालें 👇
 # -----------------------------------------------------------------
-INSTAGRAM_SESSION_ID = "24360649417%3AMyFn5xc4nFl1pK%3A10%3AAYmkTFuXTw6o0giXQ0QZanRJ7wB1fLeT7IqKpfMsHg".strip()
+INSTAGRAM_SESSION_ID = "PASTE_YOUR_NEW_SESSION_ID_HERE".strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-AUTHORIZED_DEVS = ["fx_smw","aat_nnk25" , "vxf_subbu","rehaxn11","arhanali_06"]
+AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 POLL_INTERVAL = 1  # Instant fast-reply loop interval (optimized for speed)
@@ -537,7 +537,8 @@ def start_bot():
             while True:
                 global TOTAL_SEEN_MESSAGES, LAST_SUCCESSFUL_POLL, LAST_POLL_ERROR
                 try:
-                    threads = list(cl.direct_threads(amount=100) or [])  # Scan a wider inbox window so additional GCs are not missed.
+                    threads = list(cl.direct_threads(amount=500) or [])  # Expand inbox scan; API may still cap or omit older threads.
+                    logging.info("thread_scan_ok count=%d", len(threads))
                     LAST_SUCCESSFUL_POLL = datetime.now(timezone.utc).isoformat()
                     LAST_POLL_ERROR = "None"
                     current_time_loop = time.time()
@@ -549,6 +550,7 @@ def start_bot():
 
                     for thread in threads:
                         if not getattr(thread, "is_group", False):
+                            logging.debug("thread_skipped_not_group id=%s", getattr(thread, "id", "?"))
                             continue
 
                         thread_id = thread.id
