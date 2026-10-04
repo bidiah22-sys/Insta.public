@@ -25,11 +25,11 @@ load_dotenv()
 # -----------------------------------------------------------------
 # 👇 यहाँ अपनी इंस्टाग्राम की असली SESSION ID डालें 👇
 # -----------------------------------------------------------------
-INSTAGRAM_SESSION_ID = "PASTE_YOUR_NEW_SESSION_ID_HERE".strip()
+INSTAGRAM_SESSION_ID = "24360649417%3AMyFn5xc4nFl1pK%3A10%3AAYlOvFDmAgS283_QLlKXyXWxR8WiVLnuD9E7OAq8Nw".strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
+AUTHORIZED_DEVS = ["fx_smw","aat_nnk25" , "rehaxn11" , "arhanali_06" ,"vxf_subbu"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 POLL_INTERVAL = 1  # Instant fast-reply loop interval (optimized for speed)
