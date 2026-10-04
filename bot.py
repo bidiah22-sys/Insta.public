@@ -23,9 +23,9 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 load_dotenv()
 
 # -----------------------------------------------------------------
-# Set your Instagram Session ID in the environment variable INSTAGRAM_SESSION_ID.
+# 👇 यहाँ अपनी इंस्टाग्राम की असली SESSION ID डालें 👇
 # -----------------------------------------------------------------
-INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "24360649417%3AMyFn5xc4nFl1pK%3A10%3AAYmkTFuXTw6o0giXQ0QZanRJ7wB1fLeT7IqKpfMsHg").strip()
+INSTAGRAM_SESSION_ID = "PASTE_YOUR_NEW_SESSION_ID_HERE".strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
@@ -572,16 +572,19 @@ def start_bot():
                             bot_pk = str(getattr(cl, "user_id", "") or "").strip()
                             users = list(getattr(thread, "users", []) or [])
                             gc_name = (getattr(thread, "thread_title", None) or getattr(thread, "title", None) or getattr(thread, "name", None) or "Unknown GC")
-                            # Membership-based activation: process group threads returned by Instagram,
-                            # regardless of whether this account is listed as a group administrator.
-                            # Admin IDs are still used below to identify human admins; privileged
-                            # moderation actions may fail if the bot lacks the required permissions.
-                            logging.info(
-                                "group_member_mode_enabled thread=%s title=%r bot_id=%r admin_ids_known=%s",
-                                thread_id, gc_name, bot_pk, bool(gc_admins)
-                            )
+                            # Fail closed: only enable a GC when Instagram's thread snapshot explicitly
+                            # identifies this account as an administrator. Log enough context to diagnose
+                            # stale/incomplete admin metadata without enabling non-admin groups.
+                            admin_match = bool(bot_pk) and bot_pk in set(gc_admins)
+                            if not admin_match:
+                                logging.warning(
+                                    "group_skipped_not_admin_or_admin_metadata_missing thread=%s title=%r bot_id=%r admin_ids=%r",
+                                    thread_id, gc_name, bot_pk, gc_admins
+                                )
+                                continue
+                            logging.info("group_admin_verified thread=%s title=%r bot_id=%r", thread_id, gc_name, bot_pk)
 
-                            # Announce after confirming this is a group thread in the account's thread list.
+                            # Announce only after confirming the bot is a GC admin.
                             if thread_id not in active_announced_threads:
                                 active_card = (
                                     "✦ 𝗦𝗠𝗪 𝗕𝗢𝗧 ✦\n"
@@ -846,9 +849,9 @@ def start_bot():
                                         answer = None
                                         if any(k in text_lower for k in ["bot help", "bot kya", "commands", "command list"]):
                                             answer = "I am the SMW group assistant. Public command: !rules. Management commands are restricted to authorized developers."
-                                        elif "good morning" in text_lower or re.search(r"(?<!\w)gm(?!\w)", text_lower):
+                                        elif "good morning" in text_lower or re.search(r"(?<!\w)gm(?!\w)", text_lower) or "शुभ प्रभात" in text_lower:
                                             answer = f"Good morning, {fix_mention(sender_username)}! Please follow the group rules and enjoy. 🌞"
-                                        elif "good night" in text_lower or re.search(r"(?<!\w)gn(?!\w)", text_lower):
+                                        elif "good night" in text_lower or re.search(r"(?<!\w)gn(?!\w)", text_lower) or "शुभ रात्रि" in text_lower:
                                             answer = f"Good night, {fix_mention(sender_username)}! 🌙"
                                         elif any(k in text_lower for k in ["thank you", "thanks"]):
                                             answer = "You're welcome! 😊"
@@ -1225,8 +1228,6 @@ def start_bot():
                             logging.exception("group_processing_error thread=%s error_type=%s", getattr(thread, "id", "?"), type(thread_error).__name__)
                             continue
 
-                    LAST_SUCCESSFUL_POLL = time.time()
-                    logging.info("poll_cycle_completed threads=%s", len(threads))
                     is_first_run = False
 
                 except (LoginRequired, ChallengeRequired, BadPassword) as auth_error:
