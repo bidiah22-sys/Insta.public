@@ -29,7 +29,7 @@ INSTAGRAM_SESSION_ID = "PASTE_YOUR_NEW_SESSION_ID_HERE".strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
+AUTHORIZED_DEVS = ["fx_smw","aat_nnk25","vxf_subbu","rehaxn11","arhanali_06]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 POLL_INTERVAL = max(5, int(os.getenv("POLL_INTERVAL", "8")))  # Conservative polling to reduce transient API failures
