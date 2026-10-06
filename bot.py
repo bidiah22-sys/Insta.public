@@ -26,7 +26,7 @@ load_dotenv()
 # -----------------------------------------------------------------
 # Set your Instagram Session ID here.
 # -----------------------------------------------------------------
-INSTAGRAM_SESSION_ID = "10291668651%3AooDfc5wPAIP472%3A3%3AAYky3IupEPXfN-REidW5eSsAmBNCKFhWOJk6FiKcFg".strip()
+INSTAGRAM_SESSION_ID = "10291668651%3A7zwRHBMJDFHK0d%3A12%3AAYnBE2QOxTI6R2lFrA44iO5jzCn6lZYF_tnysueB6w".strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
