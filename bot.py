@@ -23,8 +23,8 @@ load_dotenv()
 # SMW G-SECURITY — NORMAL / FAST / LIGHTWEIGHT BUILD
 # ================================================================
 # Session ID is intentionally read from the environment only.
-INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "19088037883%3AHtKEHjEIjET7Sz%3A28%3AAYn98pLlzJ1fRplqlIEITXLg9JwhxKHjUlZ-618v3A").strip()
-BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot").strip()
+INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "19088037883%3AQEE5oTG6apmh4F%3A18%3AAYnoGrgpBgyt3jyMGWDnpi3lmU3LoAkzUtsormQlDg").strip()
+BOT_USERNAME = os.getenv("BOT_USERNAME", "hm_thik_hu").strip()
 AUTHORIZED_DEVS = {"fx_smw", "aat_nnk25"}
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 POLL_INTERVAL = max(3, int(os.getenv("POLL_INTERVAL", "3")))
