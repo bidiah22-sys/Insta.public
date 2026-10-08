@@ -26,14 +26,14 @@ load_dotenv()
 # -----------------------------------------------------------------
 # Set your Instagram Session ID here.
 # -----------------------------------------------------------------
-INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "").strip()
+INSTAGRAM_SESSION_ID = os.getenv("12676506949%3AeXveeG89ZvgeNV%3A16%3AAYlLjfW6apKombf__9JUjYf7nfVEV6PKJRquIXToNw", "").strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(10, int(os.getenv("POLL_INTERVAL", "12")))  # Safer polling to reduce session/API pressure
+POLL_INTERVAL = max(3, int(os.getenv("POLL_INTERVAL", "5")))  # Safer polling to reduce session/API pressure
 LOCAL_AUTO_REPLIES = True
 DEVELOPER_DISPLAY = "𝗦𝗠𝗪🚩"
 SAFE_MODE = os.getenv("SAFE_MODE", "1").lower() in {"1", "true", "yes", "on"}
