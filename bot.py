@@ -26,14 +26,14 @@ load_dotenv()
 # -----------------------------------------------------------------
 # Set your Instagram Session ID here.
 # -----------------------------------------------------------------
-INSTAGRAM_SESSION_ID = "67689365007%3AJAdVaGkch14NEP%3A1%3AAYlhozstaObqnM-sUcjzzaSeyeX_E6NnHBJ3N2jClg".strip()
+INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "").strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(5, int(os.getenv("POLL_INTERVAL", "8")))  # Conservative polling to reduce transient API failures
+POLL_INTERVAL = max(10, int(os.getenv("POLL_INTERVAL", "12")))  # Safer polling to reduce session/API pressure
 LOCAL_AUTO_REPLIES = True
 DEVELOPER_DISPLAY = "𝗦𝗠𝗪🚩"
 SAFE_MODE = os.getenv("SAFE_MODE", "1").lower() in {"1", "true", "yes", "on"}
@@ -734,11 +734,9 @@ def start_bot():
         try:
             print("[*] Connecting to Instagram via Session ID...")
             cl = Client()
-            cl.set_user_agent(
-                "Mozilla/5.0 (Linux; Android 11; SM-G998B Build/RP1A.200720.012; wv) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/115.0.5790.166 "
-                "Mobile Safari/537.36 Instagram 290.0.0.13.76 Android"
-            )
+            # Do not spoof an old Instagram/Android User-Agent.
+            # Let instagrapi use its normal client/device configuration.
+            cl.delay_range = [1, 2]
 
             if INSTAGRAM_SESSION_ID and INSTAGRAM_SESSION_ID != "PASTE_YOUR_SESSION_ID_HERE":
                 cl.login_by_sessionid(INSTAGRAM_SESSION_ID)
@@ -827,7 +825,7 @@ def start_bot():
             while True:
                 global TOTAL_SEEN_MESSAGES, LAST_SUCCESSFUL_POLL, LAST_POLL_ERROR
                 try:
-                    threads = list(cl.direct_threads(amount=500) or [])
+                    threads = list(cl.direct_threads(amount=200) or [])
                     logging.info("thread_scan_ok count=%d", len(threads))
                     if not threads:
                         logging.warning("thread_scan_empty: Instagram returned no direct threads")
@@ -1699,13 +1697,33 @@ def start_bot():
 
                         except Exception as thread_error:
                             logging.exception("group_processing_error thread=%s error_type=%s", getattr(thread, "id", "?"), type(thread_error).__name__)
+                except (LoginRequired, ChallengeRequired, BadPassword) as auth_error:
+                    LAST_POLL_ERROR = type(auth_error).__name__
+                    logging.error("Instagram authentication/session invalid: %s", auth_error)
+                    print(f"[STOP] Instagram session requires re-authentication: {type(auth_error).__name__}")
+                    return
+                except (PleaseWaitFewMinutes, ClientThrottledError) as limit_error:
+                    LAST_POLL_ERROR = type(limit_error).__name__
+                    logging.warning("Instagram rate limit/throttle: %s", limit_error)
+                    print(f"[STOP] Instagram rate limit/throttle: {type(limit_error).__name__}")
+                    return
                 except Exception as loop_error:
                     LAST_POLL_ERROR = type(loop_error).__name__
                     logging.exception("main_polling_loop_failed error=%s", loop_error)
-                    time.sleep(10)
+                    # Keep the same authenticated client; do NOT auto-login again.
+                    time.sleep(max(20, POLL_INTERVAL))
+        except (LoginRequired, ChallengeRequired, BadPassword) as auth_error:
+            logging.error("Instagram authentication/session invalid: %s", auth_error)
+            print(f"[STOP] Instagram session requires re-authentication: {type(auth_error).__name__}")
+            return
+        except (PleaseWaitFewMinutes, ClientThrottledError) as limit_error:
+            logging.warning("Instagram rate limit/throttle: %s", limit_error)
+            print(f"[STOP] Instagram rate limit/throttle: {type(limit_error).__name__}")
+            return
         except Exception as outer_error:
             logging.exception("fatal_connection_error error=%s", outer_error)
-            time.sleep(15)
+            print(f"[STOP] Fatal bot error: {type(outer_error).__name__}: {outer_error}")
+            return
 
 if __name__ == "__main__":
     start_bot()
