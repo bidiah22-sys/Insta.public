@@ -1,4 +1,4 @@
-instagrapi
-sqlalchemy
-python-dotenv
-google-genai
+instagrapi>=2.4.5,<3
+python-dotenv>=1.0,<2
+SQLAlchemy>=2.0,<3
+psycopg2-binary>=2.9,<3
