@@ -3,6 +3,7 @@ import re
 import time
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import shutil
 import sqlite3
 from urllib.parse import urlparse
@@ -24,24 +25,44 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 load_dotenv()
 
 # -----------------------------------------------------------------
-# Set your Instagram Session ID here.
+# Credentials must be supplied through host environment variables.
+# Never commit session IDs, passwords, cookies, or API tokens to source.
 # -----------------------------------------------------------------
-INSTAGRAM_SESSION_ID = "15692634100%3AxqqBOdk79KsOvP%3A6%3AAYneolIo3qj_0ZudSMznseZFIcLbhD884pX2XEDLJQ".strip()
-
+INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "").strip()
+INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME", "").strip()
+INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD", "")
+BOT_SESSION_KEY = os.getenv("BOT_SESSION_KEY", "smw_instagram_client_settings")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
+AUTHORIZED_DEVS = ["fx_smw", "aat_nnk25"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(5, int(os.getenv("POLL_INTERVAL", "8")))  # Conservative polling to reduce transient API failures
+# The old loop had no delay after a successful scan. Use a configurable,
+# conservative interval so it cannot hammer the private endpoint in a tight loop.
+POLL_INTERVAL = max(5, int(os.getenv("POLL_INTERVAL", "7")))
+THREAD_SCAN_AMOUNT = max(50, min(500, int(os.getenv("THREAD_SCAN_AMOUNT", "500"))))
 LOCAL_AUTO_REPLIES = True
-DEVELOPER_DISPLAY = "𝗦𝗠𝗪🚩"
 SAFE_MODE = os.getenv("SAFE_MODE", "1").lower() in {"1", "true", "yes", "on"}
 STARTED_AT = time.time()
 TOTAL_SEEN_MESSAGES = 0
 LAST_SUCCESSFUL_POLL = None
 LAST_POLL_ERROR = "None"
-logging.basicConfig(filename="bot_runtime.log", level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+LOG_FILE = os.getenv("LOG_FILE", "bot_runtime.log")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[RotatingFileHandler(LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")],
+)
+
+SECURITY_STOP_ERROR_NAMES = {
+    "LoginRequired", "ClientLoginRequired", "ChallengeRequired", "BadPassword",
+    "TwoFactorRequired", "FeedbackRequired", "PleaseWaitFewMinutes",
+    "ClientThrottledError", "RateLimitError",
+}
+
+def is_security_stop_error(error):
+    """True when an Instagram auth/challenge/throttle error requires a hard stop."""
+    return any(cls.__name__ in SECURITY_STOP_ERROR_NAMES for cls in type(error).__mro__)
 
 SHADOWBANNED_USERS = set()
 TARGETED_USERS = set()
@@ -207,12 +228,54 @@ class SecurityLog(Base):
     details = Column(Text)
 
 
-engine = create_engine(DATABASE_URL, echo=False)
+class BotSessionStore(Base):
+    __tablename__ = "bot_session_store"
+    key = Column(String, primary_key=True)
+    settings_json = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=get_utc_now, onupdate=get_utc_now)
+
+
+# Voroa commonly supplies postgres:// URLs; normalize for SQLAlchemy.
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = "postgresql://" + DATABASE_URL[len("postgres://"):]
+engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine)
 
 
 def init_db():
     Base.metadata.create_all(engine)
+
+
+def load_saved_client_settings():
+    """Load private client settings from the configured database. Treat as secret data."""
+    db = SessionLocal()
+    try:
+        row = db.query(BotSessionStore).filter(BotSessionStore.key == BOT_SESSION_KEY).first()
+        if not row or not row.settings_json:
+            return None
+        return json.loads(row.settings_json)
+    finally:
+        db.close()
+
+
+def save_client_settings(client):
+    """Persist the current client settings, including authentication material, privately."""
+    payload = json.dumps(client.get_settings(), separators=(",", ":"))
+    db = SessionLocal()
+    try:
+        row = db.query(BotSessionStore).filter(BotSessionStore.key == BOT_SESSION_KEY).first()
+        if row is None:
+            row = BotSessionStore(key=BOT_SESSION_KEY, settings_json=payload, updated_at=get_utc_now())
+            db.add(row)
+        else:
+            row.settings_json = payload
+            row.updated_at = get_utc_now()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def save_setting(key: str, value: str):
@@ -247,11 +310,10 @@ def save_runtime_state():
     save_setting("lockdown", "1" if LOCKDOWN_MODE else "0")
     save_setting("antispam_enabled", "1" if ANTISPAM_ENABLED else "0")
     save_setting("antispam_limit", str(ANTISPAM_LIMIT))
-    save_setting("safe_mode", "1" if SAFE_MODE else "0")
 
 
 def restore_runtime_state():
-    global LOCKDOWN_MODE, ANTISPAM_ENABLED, ANTISPAM_LIMIT, SAFE_MODE
+    global LOCKDOWN_MODE, ANTISPAM_ENABLED, ANTISPAM_LIMIT
     try:
         TARGETED_USERS.update(str(x).casefold() for x in json.loads(load_setting("targets", "[]")))
         SHADOWBANNED_USERS.update(str(x).casefold() for x in json.loads(load_setting("shadowbans", "[]")))
@@ -263,7 +325,6 @@ def restore_runtime_state():
         ANTISPAM_LIMIT = max(2, min(10, int(load_setting("antispam_limit", "3"))))
     except ValueError:
         ANTISPAM_LIMIT = 3
-    SAFE_MODE = load_setting("safe_mode", "1" if SAFE_MODE else "0") == "1"
 
 
 def record_group_snapshot(group_id: str, group_name: str, users: list):
@@ -411,6 +472,7 @@ def group_activity_report(group_id: str, group_name: str) -> str:
             f"🔥 𝗣𝗘𝗔𝗞 𝗛𝗢𝗨𝗥 ➜ {peak}\n"
             f"🛡️ 𝗦𝗘𝗖𝗨𝗥𝗜𝗧𝗬 𝗘𝗩𝗘𝗡𝗧𝗦 𝗧𝗢𝗗𝗔𝗬 ➜ {today_events}\n\n"
             f"🏆 𝗧𝗢𝗣 𝗔𝗖𝗧𝗜𝗩𝗘 𝗠𝗘𝗠𝗕𝗘𝗥𝗦\n{top}\n\n"
+            f"👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
         )
     finally:
         db.close()
@@ -433,6 +495,7 @@ def security_overview(group_id: str, group_name: str) -> str:
             f"🎯 𝗔𝗖𝗧𝗜𝗩𝗘 𝗘𝗡𝗙𝗢𝗥𝗖𝗘𝗠𝗘𝗡𝗧𝗦 ➜ {active}\n\n"
             f"🔐 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ {'ON' if SAFE_MODE else 'OFF'}\n"
             f"🛡️ 𝗔𝗡𝗧𝗜-𝗦𝗣𝗔𝗠 ➜ {'ON' if ANTISPAM_ENABLED else 'OFF'}\n\n"
+            f"👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
         )
     finally:
         db.close()
@@ -449,7 +512,7 @@ def group_report(db, group_id: str, group_name: str) -> str:
             f"👥 𝗖𝗨𝗥𝗥𝗘𝗡𝗧 𝗢𝗕𝗦𝗘𝗥𝗩𝗘𝗗 𝗠𝗘𝗠𝗕𝗘𝗥𝗦 ➜ {observed}\n"
             f"🧾 𝗠𝗘𝗠𝗕𝗘𝗥𝗦 𝗪𝗜𝗧𝗛 𝗠𝗘𝗦𝗦𝗔𝗚𝗘 𝗛𝗜𝗦𝗧𝗢𝗥𝗬 ➜ {members}\n"
             f"💬 𝗠𝗘𝗦𝗦𝗔𝗚𝗘𝗦 𝗥𝗘𝗖𝗢𝗥𝗗𝗘𝗗 𝗕𝗬 𝗕𝗢𝗧 ➜ {messages}\n\n"
-)
+            f"👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩")
 
 
 class SpamAnalyzer:
@@ -605,7 +668,8 @@ class ModerationEngine:
                     f"💎 **𝗧𝗥𝗨𝗦𝗧 𝗦𝗖𝗢𝗥𝗘** ➜ {profile.trust_score}%\n"
                     f"📈 **𝗦𝗖𝗢𝗥𝗘 𝗕𝗔𝗥** ➜ [{bar}]\n\n"
                     f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}\n"
-                        )
+                    f"👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩"
+                )
             return f"❌ User {fix_mention(clean_user)} is not registered in Database!"
         finally:
             db.close()
@@ -712,7 +776,7 @@ def smart_intel_user_report(group_id,username):
     clean=username.lstrip("@").casefold(); db=SessionLocal()
     try:
         cutoff=get_utc_now()-timedelta(hours=24); logs=db.query(SecurityLog).filter(SecurityLog.group_id==str(group_id),func.lower(SecurityLog.username)==clean,SecurityLog.timestamp>=cutoff).limit(25).all(); state=db.query(GroupUserSecurity).filter(GroupUserSecurity.group_id==str(group_id),func.lower(GroupUserSecurity.username)==clean).first(); trust=state.trust_score if state and state.trust_score is not None else 100; severe=sum(1 for r in logs if any(k in (r.event_type or "").upper() for k in ("SCAM","RAID","MASS","CAMPAIGN","FLOOD")))
-        return f"🧠⚡ 𝗦𝗠𝗪 𝗦𝗘𝗖𝗨𝗥𝗜𝗧𝗬 𝗜𝗡𝗧𝗘𝗟𝗟𝗜𝗚𝗘𝗡𝗖𝗘\n\n👤 𝗨𝗦𝗘𝗥 ➜ {fix_mention(clean)}\n💎 𝗧𝗥𝗨𝗦𝗧 ➜ {trust:.0f}%\n📋 𝗜𝗡𝗖𝗜𝗗𝗘𝗡𝗧𝗦 𝟮𝟰𝗛 ➜ {len(logs)}\n🚨 𝗛𝗜𝗚𝗛-𝗦𝗘𝗩𝗘𝗥𝗜𝗧𝗬 𝗦𝗜𝗚𝗡𝗔𝗟𝗦 ➜ {severe}\n🧠 𝗜𝗡𝗧𝗘𝗟 𝗠𝗢𝗗𝗘 ➜ ACTIVE"
+        return f"🧠⚡ 𝗦𝗠𝗪 𝗦𝗘𝗖𝗨𝗥𝗜𝗧𝗬 𝗜𝗡𝗧𝗘𝗟𝗟𝗜𝗚𝗘𝗡𝗖𝗘\n\n👤 𝗨𝗦𝗘𝗥 ➜ {fix_mention(clean)}\n💎 𝗧𝗥𝗨𝗦𝗧 ➜ {trust:.0f}%\n📋 𝗜𝗡𝗖𝗜𝗗𝗘𝗡𝗧𝗦 𝟮𝟰𝗛 ➜ {len(logs)}\n🚨 𝗛𝗜𝗚𝗛-𝗦𝗘𝗩𝗘𝗥𝗜𝗧𝗬 𝗦𝗜𝗚𝗡𝗔𝗟𝗦 ➜ {severe}\n🧠 𝗜𝗡𝗧𝗘𝗟 𝗠𝗢𝗗𝗘 ➜ ACTIVE\n\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
     finally: db.close()
 
 def smart_intel_group_report(group_id,group_name):
@@ -721,7 +785,7 @@ def smart_intel_group_report(group_id,group_name):
         cutoff=get_utc_now()-timedelta(hours=24); rows=db.query(SecurityLog).filter(SecurityLog.group_id==str(group_id),SecurityLog.timestamp>=cutoff).all(); counts={}
         for r in rows: counts[r.event_type]=counts.get(r.event_type,0)+1
         body="\n".join(f"• {k} ➜ {v}" for k,v in sorted(counts.items(),key=lambda x:x[1],reverse=True)[:6]) or "No advanced intelligence incidents recorded."
-        return f"🧠🛡️✨ 𝗦𝗠𝗪 𝗧𝗛𝗥𝗘𝗔𝗧 𝗜𝗡𝗧𝗘𝗟 𝗖𝗘𝗡𝗧𝗘𝗥 ✨🛡️🧠\n\n🏷️ 𝗚𝗖 ➜ {group_name}\n🟢 𝗜𝗡𝗧𝗘𝗟𝗟𝗜𝗚𝗘𝗡𝗖𝗘 ➜ ACTIVE\n📋 𝗜𝗡𝗖𝗜𝗗𝗘𝗡𝗧𝗦 𝟮𝟰𝗛 ➜ {len(rows)}\n\n𝗧𝗢𝗣 𝗦𝗜𝗚𝗡𝗔𝗟𝗦\n{body}\n\n🔎 𝗗𝗘𝗖𝗜𝗦𝗜𝗢𝗡 𝗠𝗢𝗗𝗘 ➜ CORRELATION + RISK"
+        return f"🧠🛡️✨ 𝗦𝗠𝗪 𝗧𝗛𝗥𝗘𝗔𝗧 𝗜𝗡𝗧𝗘𝗟 𝗖𝗘𝗡𝗧𝗘𝗥 ✨🛡️🧠\n\n🏷️ 𝗚𝗖 ➜ {group_name}\n🟢 𝗜𝗡𝗧𝗘𝗟𝗟𝗜𝗚𝗘𝗡𝗖𝗘 ➜ ACTIVE\n📋 𝗜𝗡𝗖𝗜𝗗𝗘𝗡𝗧𝗦 𝟮𝟰𝗛 ➜ {len(rows)}\n\n𝗧𝗢𝗣 𝗦𝗜𝗚𝗡𝗔𝗟𝗦\n{body}\n\n🔎 𝗗𝗘𝗖𝗜𝗦𝗜𝗢𝗡 𝗠𝗢𝗗𝗘 ➜ CORRELATION + RISK\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
     finally: db.close()
 
 def start_bot():
@@ -731,21 +795,29 @@ def start_bot():
 
     while True:
         try:
-            print("[*] Connecting to Instagram via Session ID...")
+            print("[*] Connecting to Instagram using configured credentials/session...")
             cl = Client()
-            cl.set_user_agent(
-                "Mozilla/5.0 (Linux; Android 11; SM-G998B Build/RP1A.200720.012; wv) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/115.0.5790.166 "
-                "Mobile Safari/537.36 Instagram 290.0.0.13.76 Android"
-            )
+            saved_settings = load_saved_client_settings()
+            if saved_settings:
+                # Load the previously saved device/session profile before authentication.
+                cl.set_settings(saved_settings)
+                logging.info("saved_client_settings_loaded")
 
-            if INSTAGRAM_SESSION_ID and INSTAGRAM_SESSION_ID != "PASTE_YOUR_SESSION_ID_HERE":
+            if INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD:
+                # Preferred path: the library validates/reuses saved settings, then uses
+                # credentials only if it needs a legitimate login. Challenges are not bypassed.
+                cl.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+                save_client_settings(cl)
+                print("[+] Instagram login succeeded; session settings saved privately.")
+            elif INSTAGRAM_SESSION_ID:
+                # Session-ID-only fallback; this cannot renew a revoked session.
                 cl.login_by_sessionid(INSTAGRAM_SESSION_ID)
-                print("[+] Successfully logged in via Session ID!")
+                save_client_settings(cl)
+                print("[+] Session ID accepted; client settings saved privately.")
             else:
-                print("[!] Error: Please provide a valid INSTAGRAM_SESSION_ID!")
-                time.sleep(10)
-                continue
+                logging.error("missing_instagram_credentials")
+                print("[!] Configure INSTAGRAM_SESSION_ID, or INSTAGRAM_USERNAME + INSTAGRAM_PASSWORD, in host environment variables.")
+                return
 
             print("\n╔══════════════════════════════════════╗")
             print("║       ✦  𝗦𝗠𝗪  𝗕𝗢𝗧  ✦             ║")
@@ -755,6 +827,7 @@ def start_bot():
             print(f"[+] BOT @{BOT_USERNAME} logged in; polling enabled.")
 
             seen_message_ids = set()
+            last_session_settings_save = time.time()
             group_members_state = {}
             ever_seen_members = set()
             member_name_cache = {}
@@ -776,7 +849,7 @@ def start_bot():
             def safe_send_message(thread_id, text_content):
                 footer = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
                 lines = [line for line in str(text_content).splitlines()
-                         if not re.search(r"DEVELOPER|𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥|DEV\s*➜|SMW🚩", line, re.IGNORECASE)]
+                         if not re.search(r"DEVELOPER|𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥|DEV ➜", line, re.IGNORECASE)]
                 text_content = "\n".join(lines).rstrip() + "\n\n" + footer
                 current_time = time.time()
                 if thread_id in recent_sent_texts:
@@ -789,8 +862,10 @@ def start_bot():
                     time.sleep(0.05)
                     return True
                 except Exception as e:
-                    logging.exception("message_send_failed thread=%s", thread_id)
+                    logging.exception("message_send_failed thread=%s error_type=%s", thread_id, type(e).__name__)
                     print(f"[!] Send error: {type(e).__name__}: {e}")
+                    if is_security_stop_error(e):
+                        raise
                     return False
 
             def execute_kick(thread_id, target_pk, target_username, reason, silent=False):
@@ -802,7 +877,7 @@ def start_bot():
                         record_enforcement_action(thread_id, target_pk, target_username, "SAFE_MODE_REVIEW", reason)
                         ModerationEngine.log_event(thread_id, target_username, "SAFE_MODE_REVIEW", reason)
                         if not silent and now_alert - last_alert >= SAFE_MODE_ALERT_COOLDOWN:
-                            if safe_send_message(thread_id, f"🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 𝗥𝗘𝗩𝗜𝗘𝗪\n\n👤 𝗨𝗦𝗘𝗥 ➜ {fix_mention(target_username)}\n⚠️ 𝗥𝗘𝗔𝗦𝗢𝗡 ➜ {reason}\n⏳ 𝗔𝗖𝗧𝗜𝗢𝗡 ➜ Removal blocked; developer review required."):
+                            if safe_send_message(thread_id, f"🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 𝗥𝗘𝗩𝗜𝗘𝗪\n\n👤 𝗨𝗦𝗘𝗥 ➜ {fix_mention(target_username)}\n⚠️ 𝗥𝗘𝗔𝗦𝗢𝗡 ➜ {reason}\n⏳ 𝗔𝗖𝗧𝗜𝗢𝗡 ➜ Removal blocked; developer review required.\n\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"):
                                 SAFE_MODE_ALERT_STATE[alert_key] = now_alert
                         return
                     cl.user_remove_from_thread(thread_id, target_pk)
@@ -817,15 +892,18 @@ def start_bot():
                             f"🚫 𝗥𝗘𝗔𝗦𝗢𝗡   ➜ {reason}\n"
                             f"🛑 𝗔𝗖𝗧𝗜𝗢𝗡   ➜ REMOVED FROM GC PERMANENTLY!\n\n"
                             f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}\n"
-                                        )
+                            f"👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩"
+                        )
                         safe_send_message(thread_id, kick_card)
-                except Exception:
-                    pass
+                except Exception as kick_error:
+                    logging.exception("moderation_action_failed error_type=%s", type(kick_error).__name__)
+                    if is_security_stop_error(kick_error):
+                        raise
 
             while True:
                 global TOTAL_SEEN_MESSAGES, LAST_SUCCESSFUL_POLL, LAST_POLL_ERROR
                 try:
-                    threads = list(cl.direct_threads(amount=500) or [])
+                    threads = list(cl.direct_threads(amount=THREAD_SCAN_AMOUNT) or [])
                     logging.info("thread_scan_ok count=%d", len(threads))
                     if not threads:
                         logging.warning("thread_scan_empty: Instagram returned no direct threads")
@@ -861,10 +939,10 @@ def start_bot():
                             users = list(getattr(thread, "users", []) or [])
                             gc_name = (getattr(thread, "thread_title", None) or getattr(thread, "title", None) or getattr(thread, "name", None) or "Unknown GC")
 
-                            bot_is_gc_admin = bool(bot_pk and gc_admins and bot_pk in {str(x) for x in gc_admins})
-                            if not bot_is_gc_admin:
-                                logging.info("gc_skipped_not_admin thread=%s bot_pk=%s admins=%s", thread_id, bot_pk, len(gc_admins))
-                                continue
+                            # Monitor every group thread returned by Instagram. Some enforcement
+                            # operations may still require the bot to be a group admin; those
+                            # failures are logged rather than disabling all monitoring for the GC.
+                            logging.debug("gc_monitor_enabled thread=%s bot_pk=%s admins=%d", thread_id, bot_pk, len(gc_admins))
 
                             if thread_id not in active_announced_threads:
                                 active_card = (
@@ -873,7 +951,8 @@ def start_bot():
                                     "🛡️ 𝗚𝗥𝗢𝗨𝗣 𝗦𝗘𝗖𝗨𝗥𝗜𝗧𝗬 𝗥𝗘𝗔𝗗𝗬\n"
                                     "⚙️ 𝗔𝗟𝗟 𝗦𝗬𝗦𝗧𝗘𝗠𝗦 𝗜𝗡𝗜𝗧𝗜𝗔𝗟𝗜𝗭𝗘𝗗\n\n"
                                     f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}\n"
-                                                        )
+                                    "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
+                                )
                                 try:
                                     if safe_send_message(thread_id, active_card):
                                         active_announced_threads.add(thread_id)
@@ -1234,60 +1313,16 @@ def start_bot():
                                                 total_msgs = db.query(UserProfile).with_entities(UserProfile.total_messages).all()
                                                 total_warns = db.query(UserProfile).with_entities(UserProfile.warning_count).all()
                                                 event_count = db.query(SecurityLog).count()
-                                                safe_send_message(thread_id, f"📊 𝗦𝗠𝗪 𝗕𝗢𝗧 𝗜𝗡𝗙𝗢𝗥𝗠𝗔𝗧𝗜𝗢𝗡\n\n𝗦𝗧𝗔𝗧𝗨𝗦 ➜ 𝗢𝗡𝗟𝗜𝗡𝗘 & 𝗔𝗖𝗧𝗜𝗩𝗘\n🤖 𝗕𝗢𝗧 ➜ 𝗦𝗠𝗪\n👥 𝗧𝗥𝗔𝗖𝗞𝗘𝗗 𝗨𝗦𝗘𝗥𝗦 ➜ {total_users}\n💬 𝗧𝗥𝗔𝗖𝗞𝗘𝗗 𝗠𝗘𝗦𝗦𝗔𝗚𝗘𝗦 ➜ {sum((x[0] or 0) for x in total_msgs)}\n⚠️ 𝗪𝗔𝗥𝗡𝗜𝗡𝗚𝗦 ➜ {sum((x[0] or 0) for x in total_warns)}\n📋 𝗔𝗨𝗗𝗜𝗧 𝗘𝗩𝗘𝗡𝗧𝗦 ➜ {event_count}\n📨 𝗠𝗘𝗦𝗦𝗔𝗚𝗘𝗦 𝗧𝗛𝗜𝗦 𝗥𝗨𝗡 ➜ {TOTAL_SEEN_MESSAGES}")
+                                                safe_send_message(thread_id, f"📊 𝗦𝗠𝗪 𝗕𝗢𝗧 𝗜𝗡𝗙𝗢𝗥𝗠𝗔𝗧𝗜𝗢𝗡\n\n𝗦𝗧𝗔𝗧𝗨𝗦 ➜ 𝗢𝗡𝗟𝗜𝗡𝗘 & 𝗔𝗖𝗧𝗜𝗩𝗘\n🤖 𝗕𝗢𝗧 ➜ 𝗦𝗠𝗪\n👥 𝗧𝗥𝗔𝗖𝗞𝗘𝗗 𝗨𝗦𝗘𝗥𝗦 ➜ {total_users}\n💬 𝗧𝗥𝗔𝗖𝗞𝗘𝗗 𝗠𝗘𝗦𝗦𝗔𝗚𝗘𝗦 ➜ {sum((x[0] or 0) for x in total_msgs)}\n⚠️ 𝗪𝗔𝗥𝗡𝗜𝗡𝗚𝗦 ➜ {sum((x[0] or 0) for x in total_warns)}\n📋 𝗔𝗨𝗗𝗜𝗧 𝗘𝗩𝗘𝗡𝗧𝗦 ➜ {event_count}\n📨 𝗠𝗘𝗦𝗦𝗔𝗚𝗘𝗦 𝗧𝗛𝗜𝗦 𝗥𝗨𝗡 ➜ {TOTAL_SEEN_MESSAGES}\n\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩")
                                             finally:
                                                 db.close()
                                             continue
                                         elif text_lower == "!session":
-                                            safe_send_message(thread_id, f"🔐 Session health\nSession ID configured: {'YES' if INSTAGRAM_SESSION_ID else 'NO'}\nLast successful poll: {LAST_SUCCESSFUL_POLL or 'not yet'}\nLast error type: {LAST_POLL_ERROR}")
+                                            safe_send_message(thread_id, f"🔐 Session health\nSession ID configured: {'YES' if INSTAGRAM_SESSION_ID else 'NO'}\nPoll interval: {POLL_INTERVAL}s\nThread scan limit: {THREAD_SCAN_AMOUNT}\nLast successful poll: {LAST_SUCCESSFUL_POLL or 'not yet'}\nLast error type: {LAST_POLL_ERROR}")
                                             continue
-                                        elif text_lower == "!safe_mode" or text_lower.startswith("!safe_mode "):
-                                            parts = text.split()
-                                            action = parts[1].casefold() if len(parts) > 1 else "toggle"
-                                            if action in {"on", "enable", "enabled"}:
-                                                SAFE_MODE = True
-                                                save_runtime_state()
-                                                safe_send_message(thread_id, "🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ ON\n\n🚫 Automatic removals are blocked.\n💾 Status saved and will persist after restart.")
-                                            elif action in {"off", "disable", "disabled"}:
-                                                SAFE_MODE = False
-                                                save_runtime_state()
-                                                SAFE_MODE_ALERT_STATE.clear()
-                                                safe_send_message(thread_id, "🔓 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ OFF\n\n🚪 Automatic removals are allowed again.\n💾 Status saved and will persist after restart.")
-                                            elif action in {"clear", "reset"}:
-                                                SAFE_MODE = False
-                                                SAFE_MODE_ALERT_STATE.clear()
-                                                save_runtime_state()
-                                                cleared = clear_enforcement_actions(thread_id)
-                                                safe_send_message(thread_id, f"🧹 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 𝗖𝗟𝗘𝗔𝗥𝗘𝗗\n\n🔓 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ OFF\n📋 𝗣𝗘𝗡𝗗𝗜𝗡𝗚 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 𝗔𝗖𝗧𝗜𝗢𝗡𝗦 ➜ {cleared} CLEARED\n🚪 𝗔𝗨𝗧𝗢-𝗥𝗘𝗠𝗢𝗩𝗔𝗟 ➜ ENABLED")
-                                            elif action in {"status", "show"}:
-                                                safe_send_message(thread_id, f"🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ {'ON' if SAFE_MODE else 'OFF'}")
-                                            else:
-                                                SAFE_MODE = not SAFE_MODE
-                                                SAFE_MODE_ALERT_STATE.clear()
-                                                save_runtime_state()
-                                                safe_send_message(thread_id, f"🛡️ Safe mode is now {'ON' if SAFE_MODE else 'OFF'}. Status saved.\n\nUse !safe_mode off to allow removals or !safe_mode clear to reset it.")
-                                            continue
-                                        elif text_lower.startswith("!remove"):
-                                            parts = text.split()
-                                            target = parts[1].lstrip("@").casefold() if len(parts) > 1 else ""
-                                            if not target:
-                                                safe_send_message(thread_id, "Usage: !remove @username")
-                                                continue
-                                            if target in {d.lstrip("@").casefold() for d in AUTHORIZED_DEVS}:
-                                                safe_send_message(thread_id, "❌ Developer accounts cannot be removed by this command.")
-                                                continue
-                                            target_user = next((u for u in users if str(getattr(u, "username", "")).casefold() == target), None)
-                                            target_pk = str(getattr(target_user, "pk", "")) if target_user else ""
-                                            if not target_pk:
-                                                safe_send_message(thread_id, f"❌ @{target} was not found in this GC member list.")
-                                                continue
-                                            try:
-                                                cl.user_remove_from_thread(thread_id, target_pk)
-                                                ModerationEngine.log_event(thread_id, target, "MANUAL_REMOVE", "Developer/admin command")
-                                                clear_enforcement_actions(thread_id, target)
-                                                safe_send_message(thread_id, f"🚪 𝗠𝗘𝗠𝗕𝗘𝗥 𝗥𝗘𝗠𝗢𝗩𝗘𝗗\n\n👤 𝗨𝗦𝗘𝗥 ➜ @{target}\n🆔 𝗨𝗦𝗘𝗥 𝗜𝗗 ➜ `{target_pk}`\n⚠️ 𝗔𝗖𝗧𝗜𝗢𝗡 ➜ MANUAL REMOVAL")
-                                            except Exception as remove_error:
-                                                safe_send_message(thread_id, f"❌ Removal failed for @{target}: {type(remove_error).__name__}")
+                                        elif text_lower == "!safe_mode":
+                                            SAFE_MODE = not SAFE_MODE
+                                            safe_send_message(thread_id, f"🛡️ Safe mode is now {'ON' if SAFE_MODE else 'OFF'}. Auto-removal actions should be reviewed before use.")
                                             continue
                                         elif text_lower in {"!panel", "!status"}:
                                             uptime = int(time.time() - STARTED_AT)
@@ -1330,7 +1365,7 @@ def start_bot():
                                                 safe_send_message(thread_id, f"Backup failed: {type(backup_error).__name__}")
                                             continue
                                         elif text_lower == "!help":
-                                            safe_send_message(thread_id, "𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗖𝗘𝗡𝗧𝗘𝗥\n\nCore: !help !panel !status !botinfo !session !health !analytics\nGC: !gc !gcanalytics !gcs !gcuser [@user] !activity !security !report !inactive [days] !members !active !admins !tagall\nUsers: !profile [@user] !user [@user] !stats [@user] !risk [@user] !actions [@user]\nSecurity: !antispam on/off/status/limit N !safe_mode on/off/status/clear !remove @user !lockdown !unlock !target @user/remove/clear/list !shadowban @user/remove/clear/list !threats !threatmap !intel [@user] !securityintel [@user] !threatlog\nEnforcement: !clearaction @user !clear_action @user !clearallactions @user !nuke @user !resetwarn @user/all !unwarn @user\nSystem: !logs !backup !godmode !dp [@user]\n\nPublic: !rules")
+                                            safe_send_message(thread_id, "𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗖𝗘𝗡𝗧𝗘𝗥\n\nCore: !help !panel !status !botinfo !session !health !analytics\nGC: !gc !gcanalytics !gcs !gcuser [@user] !activity !security !report !inactive [days] !members !active !admins !tagall\nUsers: !profile [@user] !user [@user] !stats [@user] !risk [@user] !actions [@user]\nSecurity: !antispam on/off/status/limit N !safe_mode !lockdown !unlock !target @user/remove/clear/list !shadowban @user/remove/clear/list !threats !threatmap !intel [@user] !securityintel [@user] !threatlog\nEnforcement: !clearaction @user !clear_action @user !clearallactions @user !nuke @user !resetwarn @user/all !unwarn @user\nSystem: !logs !backup !godmode !dp [@user]\n\nPublic: !rules\n\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
                                             continue
                                         elif text_lower == "!lockdown":
                                             LOCKDOWN_MODE = True
@@ -1499,7 +1534,7 @@ def start_bot():
                                                     db.rollback(); cleared_actions = 0
                                                 finally:
                                                     db.close()
-                                                safe_send_message(thread_id, f"🧹✨ 𝗚𝗖 𝗘𝗡𝗙𝗢𝗥𝗖𝗘𝗠𝗘𝗡𝗧 𝗥𝗘𝗦𝗘𝗧 ✨🧹\n\n🎯 𝗔𝗖𝗧𝗜𝗩𝗘 𝗧𝗔𝗥𝗚𝗘𝗧𝗦 ➜ CLEARED\n👻 𝗦𝗛𝗔𝗗𝗢𝗪𝗕𝗔𝗡 𝗟𝗜𝗦𝗧 ➜ CLEARED\n⚠️ 𝗚𝗖 𝗪𝗔𝗥𝗡𝗜𝗡𝗚 𝗦𝗧𝗔𝗧𝗘 ➜ RESET\n📋 𝗔𝗖𝗧𝗜𝗢𝗡𝗦 ➜ {cleared_actions} CLEARED\n🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 𝗔𝗟𝗘𝗥𝗧 𝗟𝗢𝗢𝗣 ➜ CLEARED")
+                                                safe_send_message(thread_id, f"🧹✨ 𝗚𝗖 𝗘𝗡𝗙𝗢𝗥𝗖𝗘𝗠𝗘𝗡𝗧 𝗥𝗘𝗦𝗘𝗧 ✨🧹\n\n🎯 𝗔𝗖𝗧𝗜𝗩𝗘 𝗧𝗔𝗥𝗚𝗘𝗧𝗦 ➜ CLEARED\n👻 𝗦𝗛𝗔𝗗𝗢𝗪𝗕𝗔𝗡 𝗟𝗜𝗦𝗧 ➜ CLEARED\n⚠️ 𝗚𝗖 𝗪𝗔𝗥𝗡𝗜𝗡𝗚 𝗦𝗧𝗔𝗧𝗘 ➜ RESET\n📋 𝗔𝗖𝗧𝗜𝗢𝗡𝗦 ➜ {cleared_actions} CLEARED\n🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 𝗔𝗟𝗘𝗥𝗧 𝗟𝗢𝗢𝗣 ➜ CLEARED\n\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
                                             elif target_arg:
                                                 TARGETED_USERS.discard(target_arg)
                                                 SHADOWBANNED_USERS.discard(target_arg)
@@ -1509,7 +1544,7 @@ def start_bot():
                                                 save_runtime_state()
                                                 ModerationEngine.reset_warnings(target_arg)
                                                 cleared_actions = clear_enforcement_actions(thread_id, target_arg)
-                                                safe_send_message(thread_id, f"🧹✨ 𝗙𝗨𝗟𝗟 𝗘𝗡𝗙𝗢𝗥𝗖𝗘𝗠𝗘𝗡𝗧 𝗖𝗟𝗘𝗔𝗥𝗘𝗗 ✨🧹\n\n👤 𝗨𝗦𝗘𝗥 ➜ @{target_arg}\n🎯 𝗧𝗔𝗥𝗚𝗘𝗧 ➜ CLEARED\n👻 𝗦𝗛𝗔𝗗𝗢𝗪𝗕𝗔𝗡 ➜ CLEARED\n⚠️ 𝗪𝗔𝗥𝗡𝗜𝗡𝗚𝗦 ➜ RESET\n📋 𝗔𝗖𝗧𝗜𝗩𝗘 𝗔𝗖𝗧𝗜𝗢𝗡𝗦 ➜ {cleared_actions} CLEARED")
+                                                safe_send_message(thread_id, f"🧹✨ 𝗙𝗨𝗟𝗟 𝗘𝗡𝗙𝗢𝗥𝗖𝗘𝗠𝗘𝗡𝗧 𝗖𝗟𝗘𝗔𝗥𝗘𝗗 ✨🧹\n\n👤 𝗨𝗦𝗘𝗥 ➜ @{target_arg}\n🎯 𝗧𝗔𝗥𝗚𝗘𝗧 ➜ CLEARED\n👻 𝗦𝗛𝗔𝗗𝗢𝗪𝗕𝗔𝗡 ➜ CLEARED\n⚠️ 𝗪𝗔𝗥𝗡𝗜𝗡𝗚𝗦 ➜ RESET\n📋 𝗔𝗖𝗧𝗜𝗩𝗘 𝗔𝗖𝗧𝗜𝗢𝗡𝗦 ➜ {cleared_actions} CLEARED\n\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
                                             else:
                                                 safe_send_message(thread_id, "Usage: !clearallactions @username | !clearallactions all")
                                             continue
@@ -1527,7 +1562,7 @@ def start_bot():
                                                     body = "\n\n".join(lines)
                                                 else:
                                                     body = "No enforcement actions recorded for this user in this GC."
-                                                safe_send_message(thread_id, f"📋✨ 𝗘𝗡𝗙𝗢𝗥𝗖𝗘𝗠𝗘𝗡𝗧 𝗛𝗜𝗦𝗧𝗢𝗥𝗬 ✨📋\n\n👤 𝗨𝗦𝗘𝗥 ➜ @{target}\n\n{body}")
+                                                safe_send_message(thread_id, f"📋✨ 𝗘𝗡𝗙𝗢𝗥𝗖𝗘𝗠𝗘𝗡𝗧 𝗛𝗜𝗦𝗧𝗢𝗥𝗬 ✨📋\n\n👤 𝗨𝗦𝗘𝗥 ➜ @{target}\n\n{body}\n\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
                                             finally:
                                                 db.close()
                                             continue
@@ -1547,13 +1582,13 @@ def start_bot():
                                                 body = "\n".join(f"• {r.event_type} — @{r.username}: {(r.details or '')[:120]}" for r in rows) or "No advanced threat incidents in the last 24 hours."
                                             finally:
                                                 db.close()
-                                            safe_send_message(thread_id, f"🚨📋 𝗔𝗗𝗩𝗔𝗡𝗖𝗘𝗗 𝗧𝗛𝗥𝗘𝗔𝗧 𝗟𝗢𝗚\n\n{body}")
+                                            safe_send_message(thread_id, f"🚨📋 𝗔𝗗𝗩𝗔𝗡𝗖𝗘𝗗 𝗧𝗛𝗥𝗘𝗔𝗧 𝗟𝗢𝗚\n\n{body}\n\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
                                             continue
                                         elif command_token == "!risk":
                                             parts = text.split()
                                             target = parts[1].lstrip("@").strip() if len(parts) > 1 else sender_username
                                             risk, level, recent_events, active_actions = security_risk_for_user(thread_id, target)
-                                            safe_send_message(thread_id, f"🎯✨ 𝗨𝗦𝗘𝗥 𝗥𝗜𝗦𝗞 𝗣𝗥𝗢𝗙𝗜𝗟𝗘 ✨🎯\n\n👤 𝗨𝗦𝗘𝗥 ➜ {fix_mention(target)}\n📊 𝗥𝗜𝗦𝗞 𝗦𝗖𝗢𝗥𝗘 ➜ {risk}%\n🚦 𝗥𝗜𝗦𝗞 𝗟𝗘𝗩𝗘𝗟 ➜ {level}\n📋 𝗘𝗩𝗘𝗡𝗧𝗦 𝗟𝗔𝗦𝗧 𝟮𝟰𝗛 ➜ {recent_events}\n🛡️ 𝗔𝗖𝗧𝗜𝗩𝗘 𝗘𝗡𝗙𝗢𝗥𝗖𝗘𝗠𝗘𝗡𝗧𝗦 ➜ {active_actions}")
+                                            safe_send_message(thread_id, f"🎯✨ 𝗨𝗦𝗘𝗥 𝗥𝗜𝗦𝗞 𝗣𝗥𝗢𝗙𝗜𝗟𝗘 ✨🎯\n\n👤 𝗨𝗦𝗘𝗥 ➜ {fix_mention(target)}\n📊 𝗥𝗜𝗦𝗞 𝗦𝗖𝗢𝗥𝗘 ➜ {risk}%\n🚦 𝗥𝗜𝗦𝗞 𝗟𝗘𝗩𝗘𝗟 ➜ {level}\n📋 𝗘𝗩𝗘𝗡𝗧𝗦 𝗟𝗔𝗦𝗧 𝟮𝟰𝗛 ➜ {recent_events}\n🛡️ 𝗔𝗖𝗧𝗜𝗩𝗘 𝗘𝗡𝗙𝗢𝗥𝗖𝗘𝗠𝗘𝗡𝗧𝗦 ➜ {active_actions}\n\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
                                             continue
                                         elif command_token == "!guardian":
                                             risk_events = 0
@@ -1566,7 +1601,7 @@ def start_bot():
                                                 tracked_users = db.query(GroupMemberAnalytics).filter_by(group_id=str(thread_id)).count()
                                             finally:
                                                 db.close()
-                                            safe_send_message(thread_id, f"🧠🛡️✨ 𝗦𝗠𝗪 𝗚𝗖 𝗚𝗨𝗔𝗥𝗗𝗜𝗔𝗡 ✨🛡️🧠\n\n🏷️ 𝗚𝗖 ➜ {gc_name}\n🟢 𝗚𝗨𝗔𝗥𝗗𝗜𝗡𝗚 ➜ ACTIVE\n👑 𝗕𝗢𝗧 𝗔𝗗𝗠𝗜𝗡 ➜ YES\n👥 𝗧𝗥𝗔𝗖𝗞𝗘𝗗 𝗨𝗦𝗘𝗥𝗦 ➜ {tracked_users}\n📋 𝗦𝗘𝗖𝗨𝗥𝗜𝗧𝗬 𝗘𝗩𝗘𝗡𝗧𝗦 𝟮𝟰𝗛 ➜ {risk_events}\n🎯 𝗔𝗖𝗧𝗜𝗩𝗘 𝗘𝗡𝗙𝗢𝗥𝗖𝗘𝗠𝗘𝗡𝗧𝗦 ➜ {active_actions}\n🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ {'ON' if SAFE_MODE else 'OFF'}\n⚙️ 𝗔𝗡𝗧𝗜-𝗦𝗣𝗔𝗠 ➜ {'ON' if ANTISPAM_ENABLED else 'OFF'}")
+                                            safe_send_message(thread_id, f"🧠🛡️✨ 𝗦𝗠𝗪 𝗚𝗖 𝗚𝗨𝗔𝗥𝗗𝗜𝗔𝗡 ✨🛡️🧠\n\n🏷️ 𝗚𝗖 ➜ {gc_name}\n🟢 𝗚𝗨𝗔𝗥𝗗𝗜𝗡𝗚 ➜ ACTIVE\n👑 𝗕𝗢𝗧 𝗔𝗗𝗠𝗜𝗡 ➜ YES\n👥 𝗧𝗥𝗔𝗖𝗞𝗘𝗗 𝗨𝗦𝗘𝗥𝗦 ➜ {tracked_users}\n📋 𝗦𝗘𝗖𝗨𝗥𝗜𝗧𝗬 𝗘𝗩𝗘𝗡𝗧𝗦 𝟮𝟰𝗛 ➜ {risk_events}\n🎯 𝗔𝗖𝗧𝗜𝗩𝗘 𝗘𝗡𝗙𝗢𝗥𝗖𝗘𝗠𝗘𝗡𝗧𝗦 ➜ {active_actions}\n🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ {'ON' if SAFE_MODE else 'OFF'}\n⚙️ 𝗔𝗡𝗧𝗜-𝗦𝗣𝗔𝗠 ➜ {'ON' if ANTISPAM_ENABLED else 'OFF'}\n\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
                                             continue
                                         elif command_token == "!usercheck":
                                             parts = text.split()
@@ -1587,7 +1622,7 @@ def start_bot():
                                                 msg_count = messages.message_count if messages else 0
                                             finally:
                                                 db.close()
-                                            safe_send_message(thread_id, f"🧠🔎✨ 𝗦𝗠𝗔𝗥𝗧 𝗨𝗦𝗘𝗥 𝗖𝗛𝗘𝗖𝗞 ✨🔎🧠\n\n👤 𝗨𝗦𝗘𝗥 ➜ {fix_mention(target)}\n💬 𝗚𝗖 𝗠𝗘𝗦𝗦𝗔𝗚𝗘𝗦 ➜ {msg_count}\n⚠️ 𝗪𝗔𝗥𝗡𝗜𝗡𝗚𝗦 ➜ {warnings}/3\n💎 𝗧𝗥𝗨𝗦𝗧 ➜ {trust:.0f}%\n🎯 𝗥𝗜𝗦𝗞 ➜ {risk}% ({level})\n📋 𝗘𝗩𝗘𝗡𝗧𝗦 𝟮𝟰𝗛 ➜ {recent_events}\n🛡️ 𝗔𝗖𝗧𝗜𝗩𝗘 𝗔𝗖𝗧𝗜𝗢𝗡𝗦 ➜ {active_actions}")
+                                            safe_send_message(thread_id, f"🧠🔎✨ 𝗦𝗠𝗔𝗥𝗧 𝗨𝗦𝗘𝗥 𝗖𝗛𝗘𝗖𝗞 ✨🔎🧠\n\n👤 𝗨𝗦𝗘𝗥 ➜ {fix_mention(target)}\n💬 𝗚𝗖 𝗠𝗘𝗦𝗦𝗔𝗚𝗘𝗦 ➜ {msg_count}\n⚠️ 𝗪𝗔𝗥𝗡𝗜𝗡𝗚𝗦 ➜ {warnings}/3\n💎 𝗧𝗥𝗨𝗦𝗧 ➜ {trust:.0f}%\n🎯 𝗥𝗜𝗦𝗞 ➜ {risk}% ({level})\n📋 𝗘𝗩𝗘𝗡𝗧𝗦 𝟮𝟰𝗛 ➜ {recent_events}\n🛡️ 𝗔𝗖𝗧𝗜𝗩𝗘 𝗔𝗖𝗧𝗜𝗢𝗡𝗦 ➜ {active_actions}\n\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
                                             continue
                                         elif command_token == "!activity":
                                             safe_send_message(thread_id, group_activity_report(thread_id, str(gc_name)))
@@ -1597,7 +1632,7 @@ def start_bot():
                                             continue
                                         elif command_token == "!health":
                                             uptime = int(time.time() - STARTED_AT)
-                                            safe_send_message(thread_id, f"❤️‍🔥✨ 𝗦𝗠𝗪 𝗦𝗬𝗦𝗧𝗘𝗠 𝗛𝗘𝗔𝗟𝗧𝗛 ✨❤️‍🔥\n\n🟢 𝗣𝗢𝗟𝗟𝗜𝗡𝗚 ➜ {'HEALTHY' if LAST_POLL_ERROR == 'None' else 'DEGRADED'}\n🔐 𝗦𝗘𝗦𝗦𝗜𝗢𝗡 𝗜𝗗 ➜ {'CONFIGURED' if INSTAGRAM_SESSION_ID else 'MISSING'}\n🗄️ 𝗗𝗔𝗧𝗔𝗕𝗔𝗦𝗘 ➜ READY\n🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ {'ON' if SAFE_MODE else 'OFF'}\n⏱️ 𝗨𝗣𝗧𝗜𝗠𝗘 ➜ {uptime}s\n📡 𝗟𝗔𝗦𝗧 𝗣𝗢𝗟𝗟 ➜ {LAST_SUCCESSFUL_POLL or 'PENDING'}\n⚠️ 𝗟𝗔𝗦𝗧 𝗘𝗥𝗥𝗢𝗥 ➜ {LAST_POLL_ERROR}")
+                                            safe_send_message(thread_id, f"❤️‍🔥✨ 𝗦𝗠𝗪 𝗦𝗬𝗦𝗧𝗘𝗠 𝗛𝗘𝗔𝗟𝗧𝗛 ✨❤️‍🔥\n\n🟢 𝗣𝗢𝗟𝗟𝗜𝗡𝗚 ➜ {'HEALTHY' if LAST_POLL_ERROR == 'None' else 'DEGRADED'}\n🔐 𝗦𝗘𝗦𝗦𝗜𝗢𝗡 𝗜𝗗 ➜ {'CONFIGURED' if INSTAGRAM_SESSION_ID else 'MISSING'}\n🗄️ 𝗗𝗔𝗧𝗔𝗕𝗔𝗦𝗘 ➜ READY\n🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ {'ON' if SAFE_MODE else 'OFF'}\n⏱️ 𝗨𝗣𝗧𝗜𝗠𝗘 ➜ {uptime}s\n📡 𝗟𝗔𝗦𝗧 𝗣𝗢𝗟𝗟 ➜ {LAST_SUCCESSFUL_POLL or 'PENDING'}\n⚠️ 𝗟𝗔𝗦𝗧 𝗘𝗥𝗥𝗢𝗥 ➜ {LAST_POLL_ERROR}\n\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
                                             continue
                                         elif command_token == "!inactive":
                                             parts = text.split()
@@ -1740,13 +1775,29 @@ def start_bot():
 
                         except Exception as thread_error:
                             logging.exception("group_processing_error thread=%s error_type=%s", getattr(thread, "id", "?"), type(thread_error).__name__)
+                            if is_security_stop_error(thread_error):
+                                raise
+                    # Persist refreshed cookies/settings periodically without writing every scan.
+                    if time.time() - last_session_settings_save >= 300:
+                        save_client_settings(cl)
+                        last_session_settings_save = time.time()
+                    # Critical fix: the old code immediately started another 500-thread scan.
+                    time.sleep(POLL_INTERVAL)
                 except Exception as loop_error:
                     LAST_POLL_ERROR = type(loop_error).__name__
-                    logging.exception("main_polling_loop_failed error=%s", loop_error)
-                    time.sleep(10)
+                    logging.exception("main_polling_loop_failed error_type=%s", type(loop_error).__name__)
+                    if is_security_stop_error(loop_error):
+                        logging.critical("instagram_auth_or_safety_stop; bot halted; manual review required")
+                        print(f"[STOP] Instagram auth/security/rate-limit error ({type(loop_error).__name__}). Bot halted; check Instagram app and logs before restarting.")
+                        return
+                    time.sleep(max(POLL_INTERVAL, 30))
         except Exception as outer_error:
-            logging.exception("fatal_connection_error error=%s", outer_error)
-            time.sleep(15)
+            logging.exception("fatal_connection_error error_type=%s", type(outer_error).__name__)
+            if is_security_stop_error(outer_error):
+                logging.critical("startup_auth_or_safety_stop; bot halted; manual review required")
+                print(f"[STOP] Instagram auth/security/rate-limit error ({type(outer_error).__name__}). Bot halted; verify account in the official app before restarting.")
+                return
+            time.sleep(max(POLL_INTERVAL, 30))
 
 if __name__ == "__main__":
     start_bot()
