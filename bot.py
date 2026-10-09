@@ -45,9 +45,10 @@ DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 # The old loop had no delay after a successful scan. Use a configurable,
 # conservative interval so it cannot hammer the private endpoint in a tight loop.
-POLL_INTERVAL = max(4, int(os.getenv("POLL_INTERVAL", "8")))
+POLL_INTERVAL = max(20, int(os.getenv("POLL_INTERVAL", "30")))
 THREAD_SCAN_AMOUNT = max(50, min(500, int(os.getenv("THREAD_SCAN_AMOUNT", "500"))))
 LOCAL_AUTO_REPLIES = True
+DEVELOPER_DISPLAY = "𝗦𝗠𝗪🚩"
 SAFE_MODE = os.getenv("SAFE_MODE", "1").lower() in {"1", "true", "yes", "on"}
 STARTED_AT = time.time()
 TOTAL_SEEN_MESSAGES = 0
@@ -116,26 +117,20 @@ SPAM_USERNAME_PATTERNS = [
 ]
 
 BAD_WORD_PATTERNS = [
-    r"\bm[\.\_\-\s]*c\b",
-    r"\bb[\.\_\-\s]*c\b",
-    r"\bm[\.\_\-\s]*k[\.\_\-\s]*c\b",
-    r"\bt[\.\_\-\s]*m[\.\_\-\s]*k[\.\_\-\s]*c\b",
-    r"madar\s*chod",
-    r"bhen\s*chod",
-    r"behen\s*chod",
-    r"bhosd\w*",
-    r"chut\w*",
-    r"gand\w*",
-    r"gaand\w*",
-    r"lund\w*",
-    r"lauda\w*",
-    r"lawda\w*",
-    r"randi\w*",
-    r"bhadwa\w*",
-    r"bhadwe\w*",
-    r"bsdk\w*",
-    r"harami\w*",
-    r"f[\.\_\-\s]*u[\.\_\-\s]*c[\.\_\-\s]*k\w*",
+    # Match actual abusive terms as words/phrases; avoid broad prefixes such as
+    # r"gand\w*" which incorrectly match ordinary names like "Gandhi".
+    r"(?<!\w)m[._\-\s]*c(?!\w)",
+    r"(?<!\w)b[._\-\s]*c(?!\w)",
+    r"(?<!\w)m[._\-\s]*k[._\-\s]*c(?!\w)",
+    r"(?<!\w)t[._\-\s]*m[._\-\s]*k[._\-\s]*c(?!\w)",
+    r"(?<!\w)(?:madar\s*chod|madarchod|maderchod)(?!\w)",
+    r"(?<!\w)(?:bhen\s*chod|behen\s*chod|bhenchod|behenchod)(?!\w)",
+    r"(?<!\w)(?:bhosdike|bhosdi|bhosda|bhosdiwala)(?!\w)",
+    r"(?<!\w)(?:chutiya|chutiye|chutiyap|chut)(?!\w)",
+    r"(?<!\w)(?:gandu|gaandu|gaand|gand)(?!\w)",
+    r"(?<!\w)(?:lund|lauda|lawda|luda)(?!\w)",
+    r"(?<!\w)(?:randi|randwa|bhadwa|bhadwe|harami|haramkhor)(?!\w)",
+    r"(?<!\w)(?:fuck|fucking|fucker|motherfucker|bitch|bastard|asshole)(?!\w)",
 ]
 
 RESTRICTED_WORDS = set([
@@ -701,30 +696,26 @@ def normalize_for_moderation(text: str) -> str:
 
 
 def detect_abuse_reason(text: str) -> str | None:
+    """Return a reason only for a listed abusive word/phrase, not substrings in names."""
     raw = (text or "").casefold().strip()
     if not raw:
         return None
-
+    # First check the explicit patterns. Their word boundaries prevent false
+    # positives such as "Gandhi", "Rahul Gandhi", or "DM".
     for pattern in BAD_WORD_PATTERNS:
         try:
-            match = re.search(pattern, raw, re.IGNORECASE)
+            match = re.search(pattern, raw, re.IGNORECASE | re.UNICODE)
         except re.error:
             logging.exception("invalid_bad_word_pattern")
             continue
         if match:
             return f"Matched word/phrase: {match.group(0)[:80]}"
-
+    # Exact normalized-token fallback for the explicit list only.
     spaced = re.sub(r"[^\w]+", " ", raw, flags=re.UNICODE).strip()
     for word in sorted(RESTRICTED_WORDS, key=len, reverse=True):
-        candidate = str(word or "").casefold().strip()
-        if not candidate:
-            continue
-        candidate_spaced = re.sub(r"[^\w]+", " ", candidate, flags=re.UNICODE).strip()
-        if not candidate_spaced:
-            continue
-        if re.search(rf"(?<!\w){re.escape(candidate_spaced)}(?!\w)", spaced, re.UNICODE):
+        candidate = re.sub(r"[^\w]+", " ", str(word or "").casefold()).strip()
+        if candidate and re.search(rf"(?<!\w){re.escape(candidate)}(?!\w)", spaced, re.UNICODE):
             return f"Matched word/phrase: {word}"
-
     return None
 
 
@@ -1512,6 +1503,46 @@ def start_bot():
                                                     safe_send_message(thread_id, "Usage: !antispam limit 2-10")
                                             else:
                                                 safe_send_message(thread_id, f"Anti-spam: {'ON' if ANTISPAM_ENABLED else 'OFF'} | threshold: {ANTISPAM_LIMIT}/60s")
+                                            continue
+                                        elif command_token in {"!clearsafe", "!clearsafemode", "!safe_clear"}:
+                                            parts = text.split(maxsplit=1)
+                                            target_arg = parts[1].lstrip("@").strip().casefold() if len(parts) > 1 else ""
+                                            if not target_arg:
+                                                safe_send_message(thread_id, "Usage: !clearsafe @username | !clearsafe all")
+                                                continue
+                                            db = SessionLocal()
+                                            try:
+                                                if target_arg in {"all", "everyone", "*"}:
+                                                    rows = db.query(EnforcementAction).filter_by(group_id=str(thread_id), active=1).filter(EnforcementAction.action_type == "SAFE_MODE_REVIEW").all()
+                                                    for row in rows:
+                                                        row.active = 0
+                                                        row.cleared_at = get_utc_now()
+                                                    SAFE_MODE_ALERT_STATE = {k: v for k, v in SAFE_MODE_ALERT_STATE.items() if k[0] != str(thread_id)}
+                                                    db.commit()
+                                                    safe_send_message(thread_id, f"✅ Safe Mode review states cleared for this GC ({len(rows)} records).")
+                                                else:
+                                                    uid_row = db.query(GroupUserSecurity).filter_by(group_id=str(thread_id)).filter(func.lower(GroupUserSecurity.username) == target_arg).first()
+                                                    rows = db.query(EnforcementAction).filter_by(group_id=str(thread_id), active=1, username=target_arg).filter(EnforcementAction.action_type == "SAFE_MODE_REVIEW").all()
+                                                    for row in rows:
+                                                        row.active = 0
+                                                        row.cleared_at = get_utc_now()
+                                                    if uid_row:
+                                                        uid = str(uid_row.user_id)
+                                                        SAFE_MODE_ALERT_STATE = {k: v for k, v in SAFE_MODE_ALERT_STATE.items() if not (k[0] == str(thread_id) and k[1] == uid)}
+                                                        uid_row.warning_count = 0
+                                                        uid_row.violation_count = 0
+                                                        uid_row.trust_score = 100.0
+                                                    else:
+                                                        SAFE_MODE_ALERT_STATE = {k: v for k, v in SAFE_MODE_ALERT_STATE.items() if not (k[0] == str(thread_id) and target_arg in str(k[2]).casefold())}
+                                                    db.commit()
+                                                    safe_send_message(thread_id, f"✅ Safe Mode review cleared for @{target_arg}. Active review records cleared: {len(rows)}.")
+                                            except Exception:
+                                                db.rollback()
+                                                logging.exception("safe_mode_clear_failed")
+                                                safe_send_message(thread_id, "❌ Could not clear Safe Mode state. Check logs.")
+                                            finally:
+                                                db.close()
+                                            save_runtime_state()
                                             continue
                                         elif command_token in {"!clearallactions", "!clear_actions"}:
                                             parts = text.split()
