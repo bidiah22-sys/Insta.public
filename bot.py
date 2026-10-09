@@ -28,10 +28,16 @@ load_dotenv()
 # Credentials must be supplied through host environment variables.
 # Never commit session IDs, passwords, cookies, or API tokens to source.
 # -----------------------------------------------------------------
-INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "42042217220%3AtS2OtovnSGhazb%3A28%3AAYnxrj8UN25JuNFhZCvGHxcQx9CBtWlRuWabVS4O5Q").strip()
+INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "").strip()
 INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME", "").strip()
 INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD", "")
-BOT_SESSION_KEY = os.getenv("BOT_SESSION_KEY", "smw_instagram_client_settings")
+# Keep saved sessions separated by account when a username is configured.
+# An explicit BOT_SESSION_KEY from the host always takes precedence.
+_configured_session_key = os.getenv("BOT_SESSION_KEY", "").strip()
+BOT_SESSION_KEY = _configured_session_key or (
+    "smw_instagram_client_settings_" + INSTAGRAM_USERNAME.lower()
+    if INSTAGRAM_USERNAME else "smw_instagram_client_settings_sessionid"
+)
 BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk25"]
@@ -39,7 +45,7 @@ DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 # The old loop had no delay after a successful scan. Use a configurable,
 # conservative interval so it cannot hammer the private endpoint in a tight loop.
-POLL_INTERVAL = max(5, int(os.getenv("POLL_INTERVAL", "7")))
+POLL_INTERVAL = max(4, int(os.getenv("POLL_INTERVAL", "8")))
 THREAD_SCAN_AMOUNT = max(50, min(500, int(os.getenv("THREAD_SCAN_AMOUNT", "500"))))
 LOCAL_AUTO_REPLIES = True
 SAFE_MODE = os.getenv("SAFE_MODE", "1").lower() in {"1", "true", "yes", "on"}
@@ -797,23 +803,22 @@ def start_bot():
         try:
             print("[*] Connecting to Instagram using configured credentials/session...")
             cl = Client()
-            saved_settings = load_saved_client_settings()
-            if saved_settings:
-                # Load the previously saved device/session profile before authentication.
-                cl.set_settings(saved_settings)
-                logging.info("saved_client_settings_loaded")
-
-            if INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD:
-                # Preferred path: the library validates/reuses saved settings, then uses
-                # credentials only if it needs a legitimate login. Challenges are not bypassed.
+            # An explicitly configured Session ID must not be silently ignored just
+            # because username/password variables are also present. Do not load a
+            # possibly stale saved account session into this path.
+            if INSTAGRAM_SESSION_ID:
+                cl.login_by_sessionid(INSTAGRAM_SESSION_ID)
+                save_client_settings(cl)
+                print("[+] Configured Session ID accepted; client settings saved privately.")
+            elif INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD:
+                saved_settings = load_saved_client_settings()
+                if saved_settings:
+                    # Reuse the saved device/session profile for this account.
+                    cl.set_settings(saved_settings)
+                    logging.info("saved_client_settings_loaded")
                 cl.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
                 save_client_settings(cl)
                 print("[+] Instagram login succeeded; session settings saved privately.")
-            elif INSTAGRAM_SESSION_ID:
-                # Session-ID-only fallback; this cannot renew a revoked session.
-                cl.login_by_sessionid(INSTAGRAM_SESSION_ID)
-                save_client_settings(cl)
-                print("[+] Session ID accepted; client settings saved privately.")
             else:
                 logging.error("missing_instagram_credentials")
                 print("[!] Configure INSTAGRAM_SESSION_ID, or INSTAGRAM_USERNAME + INSTAGRAM_PASSWORD, in host environment variables.")
