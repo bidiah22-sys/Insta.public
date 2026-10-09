@@ -38,17 +38,16 @@ BOT_SESSION_KEY = _configured_session_key or (
     "smw_instagram_client_settings_" + INSTAGRAM_USERNAME.lower()
     if INSTAGRAM_USERNAME else "smw_instagram_client_settings_sessionid"
 )
-BOT_USERNAME = os.getenv("BOT_USERNAME", "pookieee_bot")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_yll")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk25"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 : 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 # The old loop had no delay after a successful scan. Use a configurable,
 # conservative interval so it cannot hammer the private endpoint in a tight loop.
-POLL_INTERVAL = max(20, int(os.getenv("POLL_INTERVAL", "30")))
+POLL_INTERVAL = max(4, int(os.getenv("POLL_INTERVAL", "8")))
 THREAD_SCAN_AMOUNT = max(50, min(500, int(os.getenv("THREAD_SCAN_AMOUNT", "500"))))
 LOCAL_AUTO_REPLIES = True
-DEVELOPER_DISPLAY = "𝗦𝗠𝗪🚩"
 SAFE_MODE = os.getenv("SAFE_MODE", "1").lower() in {"1", "true", "yes", "on"}
 STARTED_AT = time.time()
 TOTAL_SEEN_MESSAGES = 0
@@ -130,7 +129,15 @@ BAD_WORD_PATTERNS = [
     r"(?<!\w)(?:gandu|gaandu|gaand|gand)(?!\w)",
     r"(?<!\w)(?:lund|lauda|lawda|luda)(?!\w)",
     r"(?<!\w)(?:randi|randwa|bhadwa|bhadwe|harami|haramkhor)(?!\w)",
-    r"(?<!\w)(?:fuck|fucking|fucker|motherfucker|bitch|bastard|asshole)(?!\w)",
+    r"(?<!\w)(?:fuck|fucking|fucker|fucked|motherfucker|bitch|bitches|bastard|asshole|bullshit|dickhead|dick|pussy|whore|slut|son\s+of\s+a\s+bitch)(?!\w)",
+    # Additional explicit Hindi/Hinglish abusive terms and common spellings.
+    # Keep word boundaries: never use broad roots like `gand\w*`.
+    r"(?<!\w)(?:bhosd[iy]ke|bhosdika|bhosdiwala|bhosdiwale|bhosdich[o0]d)(?!\w)",
+    r"(?<!\w)(?:madarch[o0]d|m[a@]dar\s*chod|m[a@]der\s*chod|mch|mch[o0]d)(?!\w)",
+    r"(?<!\w)(?:behen\s*ke\s*la[u]?de|bhen\s*ke\s*la[u]?de|behen\s*ki\s*ch[u]?t|bhen\s*ki\s*ch[u]?t)(?!\w)",
+    r"(?<!\w)(?:gaand[u]?|gand[u]?|gaandm[a@]r|gandm[a@]r)(?!\w)",
+    r"(?<!\w)(?:ch[o0]d[u]?|ch[o0]di|ch[o0]dne|ch[o0]dunga|ch[o0]dungi)(?!\w)",
+    r"(?<!\w)(?:r[a@]ndi|r[a@]nd[iy]k[a@]|bh[a@]dw[a@]|har[a@]m[iy]|kutt[eiy]|kam[iy]n[eiy])(?!\w)",
 ]
 
 RESTRICTED_WORDS = set([
@@ -139,7 +146,11 @@ RESTRICTED_WORDS = set([
     "gand", "gaand", "randi", "randwa", "bhadwa", "bhadwe", "harami", "haramkhor",
     "kamine", "kamina", "saala", "saale", "madarchod", "maderchod", "madar-chod",
     "bhenchod", "behenchod", "bhen-chod", "behen-chod", "bhosdike", "bhosdi",
-    "bhosda", "fuck", "fucking", "fucker", "motherfucker", "bitch", "bastard", "asshole"
+    "bhosda", "bhosdika", "bhosdiwale", "bhosdichod", "madarchod", "mch", "mchhod",
+    "gaandmar", "gandmar", "chodu", "chodi", "chodne", "chodunga", "chodungi",
+    "behenkelode", "bhenkelode", "behenkichut", "bhenkichut", "randika", "randikay",
+    "kutte", "kutti", "kaminey", "fuck", "fucking", "fucker", "fucked", "motherfucker",
+    "bitch", "bitches", "bastard", "asshole", "bullshit", "dickhead", "dick", "pussy", "whore", "slut"
 ])
 
 Base = declarative_base()
@@ -720,34 +731,90 @@ def detect_abuse_reason(text: str) -> str | None:
 
 
 def detect_link_type(text: str) -> str | None:
-    value = (text or "").casefold().strip()
+    """Detect URLs, bare domains, IP-based URLs, and common obfuscated schemes."""
+    value = str(text or "").strip()
     if not value:
         return None
-    url_pattern = r"(?:https?://|www\.)[^\s<>]+|\b(?:instagram\.com|instagr\.am|bit\.ly|tinyurl\.com|t\.me|wa\.me|youtu\.be|youtube\.com|linktr\.ee|facebook\.com|x\.com|tiktok\.com)/[^\s<>]*"
-    if re.search(url_pattern, value, re.IGNORECASE):
-        if re.search(r"(?:instagram\.com|instagr\.am)/(?:reel|reels)(?:/|\b)", value, re.IGNORECASE):
-            return "Instagram Reel Link"
-        if re.search(r"(?:instagram\.com|instagr\.am)/(?:p|tv)/", value, re.IGNORECASE):
-            return "Instagram Post / Video Link"
+    # Normalize invisible characters and common punctuation wrappers without
+    # changing the original text shown on the warning card.
+    probe = re.sub(r"[\u200b-\u200f\ufeff]", "", value).casefold()
+    # Strip common wrapping punctuation before matching; preserve original text for the card.
+    probe = probe.replace("\\.", ".").replace("[.]", ".").replace("(dot)", ".").replace(" dot ", ".")
+    patterns = (
+        r"(?<![\w@])(?:https?|hxxps?|ftp)\s*:\s*/\s*/[^\s<>]+",  # schemes, including hxxp
+        r"(?<![\w@])www\s*\.\s*[a-z0-9-]+(?:\s*\.\s*[a-z]{2,})(?:/[^\s<>]*)?",
+        r"(?<![\w@])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{1,5})?(?:[/?:#][^\s<>]*)?",
+        r"(?<![\w@])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:[/?:#][^\s<>]*)?",
+        r"(?<![\w@])(?:bit\.ly|tinyurl\.com|t\.me|wa\.me|youtu\.be|lnkd\.in|linktr\.ee|instagr\.am|telegram\.me)(?:/[^\s<>]*)?",
+    )
+    if not any(re.search(pattern, probe, re.IGNORECASE) for pattern in patterns):
+        return None
+    if re.search(r"(?:instagram\.com|instagr\.am)/(?:reel|reels)(?:/|\b)", probe, re.IGNORECASE):
+        return "Instagram Reel Link"
+    if re.search(r"(?:instagram\.com|instagr\.am)/(?:p|tv)/", probe, re.IGNORECASE):
+        return "Instagram Post / Video Link"
+    if re.search(r"(?<![\w@])(?:https?|ftp)\s*:", probe, re.IGNORECASE) or re.search(r"(?<![\w@])www\.", probe, re.IGNORECASE):
         return "External Link"
-    if re.search(r"\b[a-z0-9-]+\.(?:com|net|org|xyz|top|info|site|link|io|me|co|in|app|gg)(?:/[^\s]*)?", value, re.IGNORECASE):
-        return "Bare Domain Link"
-    return None
+    return "Bare Domain Link"
 
 
 def extract_urls(text: str) -> list[str]:
-    found=re.findall(r"(?:https?://|www\.)[^\s<>]+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s<>]*)?",str(text or ""),re.I)
-    return [x.rstrip(".,!?;:)]}") for x in found]
+    raw = re.sub(r"[\u200b-\u200f\ufeff]", "", str(text or ""))
+    raw = raw.replace("\\.", ".").replace("[.]", ".").replace("(dot)", ".").replace(" dot ", ".")
+    patterns = [
+        r"(?:https?|hxxps?|ftp)\s*:\s*/\s*/[^\s<>]+",
+        r"(?<![\w@])www\s*\.\s*[a-z0-9-]+(?:\s*\.\s*[a-z]{2,})(?:/[^\s<>]*)?",
+        r"(?<![\w@])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{1,5})?(?:[/?:#][^\s<>]*)?",
+        r"(?<![\w@])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:[/?:#][^\s<>]*)?",
+    ]
+    found=[]
+    for pattern in patterns:
+        found.extend(re.findall(pattern, raw, re.IGNORECASE))
+    cleaned=[]
+    for item in sorted(found, key=len, reverse=True):
+        item=item.rstrip(".,!?;:)]}\"'")
+        if item and not any(item in prior for prior in cleaned):
+            cleaned.append(item)
+    return sorted(cleaned, key=lambda x: raw.casefold().find(x.casefold()))
+
 
 def extract_domains(text: str) -> list[str]:
     out=[]
     for item in extract_urls(text):
         try:
-            host=(urlparse(item if re.match(r"^[a-z]+://",item,re.I) else "https://"+item).hostname or "").lower().strip(".")
+            candidate = re.sub(r"\s+", "", item)
+            host=(urlparse(candidate if re.match(r"^[a-z]+://",candidate,re.I) else "https://"+candidate).hostname or "").lower().strip(".")
             if host.startswith("www."): host=host[4:]
-            if host: out.append(host)
-        except Exception: pass
+            if host and host not in out: out.append(host)
+        except Exception:
+            pass
     return out
+
+
+def get_message_link_text(message, text: str) -> str:
+    """Include URL fields from Instagram shared-link message objects when present."""
+    parts=[str(text or "")]
+    for attr in ("link", "links", "share", "media_share", "reel_share", "story_share", "visual_media"):
+        try:
+            obj=getattr(message, attr, None)
+        except Exception:
+            obj=None
+        if not obj:
+            continue
+        candidates=[]
+        if isinstance(obj, str):
+            candidates=[obj]
+        elif isinstance(obj, dict):
+            for key in ("url", "web_url", "link_url", "href", "permalink", "text"):
+                val=obj.get(key)
+                if isinstance(val, str): candidates.append(val)
+        else:
+            for key in ("url", "web_url", "link_url", "href", "permalink", "text"):
+                try: val=getattr(obj, key, None)
+                except Exception: val=None
+                if isinstance(val, str): candidates.append(val)
+        parts.extend(candidates)
+    return " ".join(x for x in parts if x)
 
 def security_intelligence_signals(text: str) -> dict:
     raw=str(text or "").strip(); lower=raw.casefold(); urls=extract_urls(raw); domains=extract_domains(raw); mentions=len(re.findall(r"(?<!\w)@[a-z0-9._]{2,30}",lower,re.I)); scam=[x for x in SCAM_PHRASES if x in lower]; suspicious=[d for d in domains if d.rsplit(".",1)[-1] in SUSPICIOUS_TLDS]; score=0; reasons=[]
@@ -1113,6 +1180,33 @@ def start_bot():
                                     ModerationEngine.record_activity(sender_id, sender_username, thread_id)
                                     record_group_message(thread_id, str(gc_name), sender_id, sender_username)
                                     logging.info("message_seen thread=%s user=%s", thread_id, sender_username)
+
+                                    # Run link moderation immediately for every incoming message, before
+                                    # flood/anti-spam branches can `continue` and skip link checks.
+                                    link_text = get_message_link_text(last_msg, text)
+                                    link_kind = detect_link_type(link_text)
+                                    if link_kind:
+                                        urls_found = extract_urls(link_text)
+                                        domains_found = extract_domains(link_text)
+                                        link_target = (urls_found[0] if urls_found else (domains_found[0] if domains_found else "Link detected"))[:160]
+                                        link_reason = f"{link_kind}: {link_target}"
+                                        warns, trust = ModerationEngine.add_warning(sender_username, thread_id, sender_id)
+                                        record_enforcement_action(thread_id, sender_id, sender_username, "LINK_WARNING", link_reason)
+                                        ModerationEngine.log_event(thread_id, sender_username, "LINK_DETECTED", link_reason)
+                                        link_card = (
+                                            f"🔗🚨 𝗟𝗜𝗡𝗞 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗\n\n"
+                                            f"👤 𝗨𝗦𝗘𝗥 ➜ {fix_mention(sender_username)}\n"
+                                            f"🌐 𝗧𝗬𝗣𝗘 ➜ {link_kind}\n"
+                                            f"🔎 𝗟𝗜𝗡𝗞 ➜ {link_target}\n"
+                                            f"⚠️ 𝗪𝗔𝗥𝗡𝗜𝗡𝗚𝗦 ➜ {warns}/2\n"
+                                            f"📢 𝗔𝗗𝗠𝗜𝗡 𝗔𝗟𝗘𝗥𝗧 ➜ {admin_mentions_tag}\n\n"
+                                            f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
+                                        )
+                                        safe_send_message(thread_id, link_card)
+                                        if warns >= 2 and not (is_dev or is_sender_admin):
+                                            execute_kick(thread_id, sender_id, sender_username, f"Repeated link sharing ({link_kind})")
+                                        # Do not process the same link message as a separate abuse/auto-reply event.
+                                        continue
 
                                     if SMART_INTEL_ENABLED and text and not is_dev and not is_sender_admin and not text_lower.startswith("!"):
                                         signals = security_intelligence_signals(text)
