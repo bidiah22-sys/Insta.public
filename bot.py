@@ -28,7 +28,7 @@ load_dotenv()
 # Credentials must be supplied through host environment variables.
 # Never commit session IDs, passwords, cookies, or API tokens to source.
 # -----------------------------------------------------------------
-INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "").strip()
+INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "42042217220%3AtS2OtovnSGhazb%3A28%3AAYnxrj8UN25JuNFhZCvGHxcQx9CBtWlRuWabVS4O5Q").strip()
 INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME", "").strip()
 INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD", "")
 BOT_SESSION_KEY = os.getenv("BOT_SESSION_KEY", "smw_instagram_client_settings")
