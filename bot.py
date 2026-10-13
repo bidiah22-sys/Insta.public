@@ -33,13 +33,17 @@ INLINE_SESSION_ID = ""
 INSTAGRAM_SESSION_ID = (os.getenv("INSTAGRAM_SESSION_ID", "").strip()
                         or os.getenv("IG_SESSION_ID", "").strip()
                         or INLINE_SESSION_ID.strip())
+# Persistent instagrapi settings keep the same device/session identifiers across restarts.
+SESSION_SETTINGS_FILE = Path(os.getenv("SESSION_SETTINGS_FILE", "session.json"))
+INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME", os.getenv("IG_USERNAME", "")).strip()
+INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD", os.getenv("IG_PASSWORD", "")).strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_yll")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(2, min(60, int(os.getenv("POLL_INTERVAL", "5"))))  # Fast but bounded polling; avoid aggressive API loops
+POLL_INTERVAL = max(1, min(60, int(os.getenv("POLL_INTERVAL", "4"))))  # Fast but bounded polling; avoid aggressive API loops
 THREAD_SCAN_AMOUNT = max(20, min(500, int(os.getenv("THREAD_SCAN_AMOUNT", "100"))))
 TIMEZONE_NAME = os.getenv("TIMEZONE", "Asia/Kolkata")
 SEEN_MESSAGE_CACHE_LIMIT = 5000
@@ -559,21 +563,33 @@ def start_bot():
         try:
             print("[*] Connecting to Instagram via Session ID...")
             cl = Client()
-            cl.set_user_agent(
-                "Mozilla/5.0 (Linux; Android 11; SM-G998B Build/RP1A.200720.012; wv) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/115.0.5790.166 "
-                "Mobile Safari/537.36 Instagram 290.0.0.13.76 Android"
-            )
+            # Restore the stable device profile/cookies before authentication.
+            if SESSION_SETTINGS_FILE.exists():
+                try:
+                    cl.load_settings(SESSION_SETTINGS_FILE)
+                    logging.info("saved_instagram_session_settings_loaded")
+                except Exception:
+                    logging.exception("saved_instagram_session_settings_load_failed")
 
-            if INSTAGRAM_SESSION_ID and INSTAGRAM_SESSION_ID not in {"PASTE_YOUR_SESSION_ID_HERE", "PASTE_YOUR_NEW_SESSION_ID_HERE", "YOUR_SESSION_ID_HERE"}:
-                cl.login_by_sessionid(INSTAGRAM_SESSION_ID)
-                logging.info("instagram_session_login_succeeded")
-                print("[+] Successfully logged in via Session ID!")
-            else:
-                logging.error("instagram_session_id_missing_or_placeholder")
-                print("[!] Error: Set INSTAGRAM_SESSION_ID in the hosting environment variables.")
-                time.sleep(10)
-                continue
+            try:
+                if INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD:
+                    # Preferred long-lived flow: validate/reuse saved settings, then persist refreshed state.
+                    cl.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+                    logging.info("instagram_login_succeeded_with_saved_settings_or_credentials")
+                elif INSTAGRAM_SESSION_ID and INSTAGRAM_SESSION_ID not in {"PASTE_YOUR_SESSION_ID_HERE", "PASTE_YOUR_NEW_SESSION_ID_HERE", "YOUR_SESSION_ID_HERE"}:
+                    cl.login_by_sessionid(INSTAGRAM_SESSION_ID)
+                    logging.info("instagram_session_id_login_succeeded")
+                else:
+                    raise RuntimeError("Set INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD for automatic recovery, or provide INSTAGRAM_SESSION_ID for session-only login.")
+                try:
+                    cl.dump_settings(SESSION_SETTINGS_FILE)
+                    logging.info("instagram_session_settings_saved")
+                except Exception:
+                    logging.exception("instagram_session_settings_save_failed")
+                print("[+] Successfully connected to Instagram!")
+            except Exception:
+                logging.exception("instagram_initial_login_failed")
+                raise
 
             print("\n╔══════════════════════════════════════╗")
             print("║       ✦  𝗦𝗠𝗪  𝗕𝗢𝗧  ✦             ║")
@@ -686,15 +702,6 @@ def start_bot():
                             continue
 
                         thread_id = thread.id
-                        if thread_id not in active_announced_threads:
-                            # Short GC-only startup notice; existing card/footer styling is preserved.
-                            active_card = "🎀 𝗦𝗠𝗪🚩 𝗕𝗢𝗧 𝗔𝗖𝗧𝗜𝗩𝗘 🎀"
-                            try:
-                                safe_send_message(thread_id, active_card)
-                                active_announced_threads.add(thread_id)
-                            except Exception as announce_error:
-                                print(f"[!] Startup card failed for thread {thread_id}: {announce_error}")
-
                         gc_admins = []
                         try:
                             if hasattr(thread, "admin_user_ids") and thread.admin_user_ids:
@@ -704,7 +711,15 @@ def start_bot():
                         except Exception:
                             gc_admins = []
 
+                        # Silent hard gate: no messages, analytics, moderation, or commands unless bot is a GC admin.
                         bot_pk = str(cl.user_id)
+                        if bot_pk not in {str(uid) for uid in gc_admins}:
+                            continue
+
+                        if thread_id not in active_announced_threads:
+                            active_card = "🎀 𝗦𝗠𝗪🚩 𝗕𝗢𝗧 𝗔𝗖𝗧𝗜𝗩𝗘 🎀"
+                            if safe_send_message(thread_id, active_card):
+                                active_announced_threads.add(thread_id)
                         users = list(getattr(thread, "users", []) or [])
                         gc_name = (getattr(thread, "thread_title", None) or getattr(thread, "title", None) or getattr(thread, "name", None) or "Unknown GC")
                         record_group_snapshot(thread_id, str(gc_name), users)
@@ -1553,7 +1568,10 @@ def start_bot():
         except (PleaseWaitFewMinutes, ClientThrottledError) as limit_error:
             return
         except Exception as e:
-            print(f"[!] Critical error: {e}")
+            LAST_POLL_ERROR = type(e).__name__
+            logging.exception("critical_connection_or_login_error")
+            print(f"[!] Critical error: {type(e).__name__}: {e}")
+            # Do not hot-loop authentication failures; restart the outer connection cycle.
             time.sleep(5)
 
 
