@@ -43,7 +43,7 @@ OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(10, min(60, int(os.getenv("POLL_INTERVAL", "12"))))  # Fast but bounded polling; avoid aggressive API loops
+POLL_INTERVAL = max(1, min(15, int(os.getenv("POLL_INTERVAL", "1"))))  # Fast but bounded polling; avoid aggressive API loops
 THREAD_SCAN_AMOUNT = max(20, min(500, int(os.getenv("THREAD_SCAN_AMOUNT", "100"))))
 TIMEZONE_NAME = os.getenv("TIMEZONE", "Asia/Kolkata")
 SEEN_MESSAGE_CACHE_LIMIT = 5000
@@ -561,35 +561,70 @@ def start_bot():
 
     while True:
         try:
-            print("[*] Connecting to Instagram via Session ID...")
+            print("[*] Connecting to Instagram...")
             cl = Client()
-            # Restore the stable device profile/cookies before authentication.
-            if SESSION_SETTINGS_FILE.exists():
-                try:
-                    cl.load_settings(SESSION_SETTINGS_FILE)
-                    logging.info("saved_instagram_session_settings_loaded")
-                except Exception:
-                    logging.exception("saved_instagram_session_settings_load_failed")
+            # Reuse saved device/session settings when available. The file must live on
+            # persistent storage (for example, a Railway Volume) to survive redeploys.
+            login_error = None
+            session_id = INSTAGRAM_SESSION_ID.strip()
+            has_session_id = bool(session_id) and session_id not in {
+                "PASTE_YOUR_SESSION_ID_HERE", "PASTE_YOUR_NEW_SESSION_ID_HERE", "YOUR_SESSION_ID_HERE"
+            }
+            has_credentials = bool(INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD)
 
-            try:
-                if INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD:
-                    # Preferred long-lived flow: validate/reuse saved settings, then persist refreshed state.
-                    cl.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-                    logging.info("instagram_login_succeeded_with_saved_settings_or_credentials")
-                elif INSTAGRAM_SESSION_ID and INSTAGRAM_SESSION_ID not in {"PASTE_YOUR_SESSION_ID_HERE", "PASTE_YOUR_NEW_SESSION_ID_HERE", "YOUR_SESSION_ID_HERE"}:
-                    cl.login_by_sessionid(INSTAGRAM_SESSION_ID)
-                    logging.info("instagram_session_id_login_succeeded")
-                else:
-                    raise RuntimeError("Set INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD for automatic recovery, or provide INSTAGRAM_SESSION_ID for session-only login.")
+            # First try the provided Session ID, preserving the user's existing login path.
+            if has_session_id:
                 try:
-                    cl.dump_settings(SESSION_SETTINGS_FILE)
-                    logging.info("instagram_session_settings_saved")
-                except Exception:
-                    logging.exception("instagram_session_settings_save_failed")
-                print("[+] Successfully connected to Instagram!")
+                    cl.login_by_sessionid(session_id)
+                    logging.info("instagram_session_id_login_succeeded")
+                    print("[+] Successfully logged in via Session ID!")
+                except Exception as exc:
+                    login_error = exc
+                    logging.exception("instagram_session_id_login_failed")
+                    print(f"[!] Session ID login failed: {type(exc).__name__}: {exc}")
+                    if not has_credentials:
+                        raise RuntimeError(
+                            "Session ID login failed and username/password Variables are not both set. "
+                            f"Original error: {type(exc).__name__}: {exc}"
+                        ) from exc
+                    # Use a fresh client for fallback, so failed Session ID cookies do not leak in.
+                    print("[*] Trying username/password recovery login...")
+                    cl = Client()
+                    if SESSION_SETTINGS_FILE.exists():
+                        try:
+                            cl.load_settings(str(SESSION_SETTINGS_FILE))
+                            logging.info("saved_instagram_session_settings_loaded_for_recovery")
+                        except Exception:
+                            logging.exception("saved_instagram_session_settings_load_failed")
+                    cl.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+                    logging.info("instagram_credential_fallback_login_succeeded")
+                    print("[+] Successfully recovered login with configured credentials!")
+            elif has_credentials:
+                # No Session ID: reuse saved settings/device identifiers, then authenticate.
+                if SESSION_SETTINGS_FILE.exists():
+                    try:
+                        cl.load_settings(str(SESSION_SETTINGS_FILE))
+                        logging.info("saved_instagram_session_settings_loaded")
+                    except Exception:
+                        logging.exception("saved_instagram_session_settings_load_failed")
+                cl.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+                logging.info("instagram_login_succeeded_with_credentials")
+                print("[+] Successfully logged in with configured credentials!")
+            else:
+                raise RuntimeError(
+                    "No usable login credentials found. Set INSTAGRAM_SESSION_ID, or set both "
+                    "INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD in hosting Variables."
+                )
+
+            # Persist refreshed cookies/device settings after every successful login.
+            try:
+                SESSION_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+                cl.dump_settings(str(SESSION_SETTINGS_FILE))
+                logging.info("instagram_session_settings_saved path=%s", SESSION_SETTINGS_FILE)
+                print(f"[+] Session settings saved to {SESSION_SETTINGS_FILE}")
             except Exception:
-                logging.exception("instagram_initial_login_failed")
-                raise
+                logging.exception("instagram_session_settings_save_failed")
+                print("[!] Warning: could not save session settings; check persistent-volume path/permissions.")
 
             print("\n╔══════════════════════════════════════╗")
             print("║       ✦  𝗦𝗠𝗪  𝗕𝗢𝗧  ✦             ║")
