@@ -34,13 +34,13 @@ INSTAGRAM_SESSION_ID = (os.getenv("INSTAGRAM_SESSION_ID", "").strip()
                         or os.getenv("IG_SESSION_ID", "").strip()
                         or INLINE_SESSION_ID.strip())
 
-BOT_USERNAME = os.getenv("BOT_USERNAME", "bekar_innsan_huu")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_yll")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(4, min(60, int(os.getenv("POLL_INTERVAL", "4"))))  # Fast but bounded polling; avoid aggressive API loops
-THREAD_SCAN_AMOUNT = max(20, min(100, int(os.getenv("THREAD_SCAN_AMOUNT", "40"))))
+POLL_INTERVAL = max(10, min(60, int(os.getenv("POLL_INTERVAL", "12"))))  # Fast but bounded polling; avoid aggressive API loops
+THREAD_SCAN_AMOUNT = max(20, min(500, int(os.getenv("THREAD_SCAN_AMOUNT", "100"))))
 TIMEZONE_NAME = os.getenv("TIMEZONE", "Asia/Kolkata")
 SEEN_MESSAGE_CACHE_LIMIT = 5000
 LOCAL_AUTO_REPLIES = True
@@ -435,30 +435,26 @@ class ModerationEngine:
 # Explicit profanity list. Matching is boundary-aware to avoid false positives such as
 # ordinary names/phrases that merely contain a short character sequence.
 ABUSIVE_TERMS = [
-    # Romanized Hindi / Hinglish profanity and common spellings
-    "madarchod", "madar chod", "madarchod", "maderchod", "madarchod", "madarchood",
-    "behenchod", "bhenchod", "bhen ch*d", "behen ch*d", "bhenchod", "bhen ke lode",
-    "maa ke lode", "ma ke lode", "maa chod", "ma chod", "gaand mara", "gand mara",
+    # Explicit Romanized Hindi / Hinglish profanity and common spellings.
+    "madarchod", "madar chod", "maderchod", "madarchood", "maa chod", "ma chod",
+    "behenchod", "bhenchod", "behen chod", "bhen chod", "bhen ke lode", "maa ke lode", "ma ke lode",
     "bhosdike", "bhosdi ke", "bhosdika", "bhosda", "bhosdi", "bhosadike", "bhosadika",
-    "chutiya", "chutiye", "chutiyap", "chutiapa", "chutmarika", "chutmarani",
-    "chut", "chutad", "chut ka", "gandu", "gaandu", "gandua", "gand mara",
-    "gaand", "gand", "gandfat", "gandfattu", "gaandfat", "gaandfattu",
+    "chutiya", "chutiye", "chutiyap", "chutiapa", "chutmarika", "chutmarani", "chut ka",
+    "gandu", "gaandu", "gandua", "gaand mara", "gand mara", "gaandfat", "gandfat", "gandfattu", "gaandfattu",
     "lund", "lauda", "lawda", "loda", "lodu", "lode", "lund fakir", "lund le",
-    "randi", "randwa", "randibaaz", "raand", "bhadwa", "bhadwe", "bhadwi",
-    "harami", "haramkhor", "haraamkhor", "kamina", "kamine", "kameena", "kutti",
-    "kutte", "kutta", "saala", "saale", "sala kutta", "teri maa", "teri behen",
-    "teri gaand", "teri gand", "teri aukaat", "teri mkc", "teri maa ki", "teri bahan ki",
-    "mc", "bc", "mkc", "tmkc", "bsdk", "bkl", "bklol", "lodu saala", "jhatu", "jhaatu",
-    "chakka", "hijra", "suar", "suar ki aulad", "ullu ka pattha", "nalayak harami",
-    # English profanity / insults
-    "fuck", "fucking", "fucked", "fucker", "fuckers", "motherfucker", "motherfuckers",
-    "bullshit", "shithead", "shitface", "shit", "shitty", "bitch", "bitches", "bitchy",
-    "bastard", "bastards", "asshole", "assholes", "dickhead", "dickheads", "dick",
-    "dickwad", "prick", "piss off", "pissed", "son of a bitch", "slut", "sluts",
-    "whore", "whores", "cunt", "cunts", "twat", "wanker", "wankers", "dumbass",
-    "jackass", "dipshit", "arsehole", "arse", "bloody hell", "damn you", "go to hell",
-    # Additional commonly used insults (kept as explicit whole terms)
-    "stupid bastard", "fat bitch", "dirty bitch",
+    "randi", "randwa", "randibaaz", "raand", "bhadwa", "bhadwe", "bhadwi", "haramkhor", "haraamkhor",
+    "teri maa ki", "teri bahan ki", "teri behen ki", "teri gaand", "teri gand", "teri mkc", "tmkc", "bsdk", "bkl",
+    "jhatu", "jhaatu", "gaand mein", "gaand me", "gaand maar", "gaand marao", "gaand phaad",
+    # Common Devanagari-script variants of explicit Hindi profanity.
+    "मादरचोद", "मादर चोद", "बहनचोद", "बहन चोद", "भोसड़ीके", "भोसड़ी के", "चूतिया",
+    "गांडू", "लंड", "रंडी", "हरामी", "हरामखोर", "कमीना", "कमीने",
+    # Explicit English profanity and direct vulgar insults.
+    "fuck", "fucking", "fucked", "fucker", "fuckers", "motherfucker", "motherfuckers", "bullshit",
+    "shithead", "shitface", "shit", "shitty", "bitch", "bitches", "bastard", "bastards", "asshole", "assholes",
+    "dickhead", "dickheads", "dickwad", "prick", "piss off", "son of a bitch", "slut", "sluts", "whore", "whores",
+    "cunt", "cunts", "twat", "wanker", "wankers", "dumbass", "jackass", "dipshit", "arsehole", "arse",
+    # Compound insults that are unambiguously abusive.
+    "stupid bastard", "fat bitch", "dirty bitch", "piece of shit", "fuck off", "go fuck yourself",
 ]
 
 # Build patterns that allow punctuation/spacing between letters while requiring word boundaries.
@@ -492,34 +488,37 @@ def detect_abuse_reason(text: str) -> str | None:
 
 
 def detect_link_type(text: str) -> str | None:
-    """Detect URLs/domains in ordinary text, including punctuation-wrapped links."""
+    """Detect common and less-common URL forms, including bare domains and IP URLs."""
     value = unicodedata.normalize("NFKC", str(text or "")).casefold()
-    value = re.sub(r"[\u200b-\u200f\ufeff]", "", value)
-    if not value.strip():
+    value = re.sub(r"[\u200b-\u200f\ufeff\u202a-\u202e]", "", value)
+    value = value.strip()
+    if not value:
         return None
-    # Match full URLs, www links, common shorteners/social domains, and bare domains
-    # even when followed by punctuation or a query string.
-    url_pattern = re.compile(
-        r"(?<![\w@])(?:https?://|www\.)[^\s<>\"']+|"
-        r"(?<![\w@])(?:instagram\.com|instagr\.am|ig\.me|bit\.ly|tinyurl\.com|"
-        r"t\.me|wa\.me|youtu\.be|youtube\.com|linktr\.ee|facebook\.com|"
-        r"x\.com|tiktok\.com|discord\.gg|chat\.whatsapp\.com)(?:/[^\s<>\"']*)?",
+
+    # Explicit schemes and www links, including punctuation/query/fragment suffixes.
+    explicit_url = re.compile(
+        r"(?<![\w@])(?:https?://|ftp://|www\.)[^\s<>\"']+",
         re.IGNORECASE,
     )
-    if url_pattern.search(value):
+    # Any syntactically plausible domain with a 2-63 letter TLD, not a small allow-list.
+    # Also catches social links, invite links, shortened links, and newer TLDs.
+    bare_domain = re.compile(
+        r"(?<![\w@])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
+        r"[a-z]{2,63}(?::\d{1,5})?(?:[/\?#][^\s<>\"']*)?",
+        re.IGNORECASE,
+    )
+    ip_url = re.compile(
+        r"(?<![\w@])(?:https?://)?(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:[/\?#][^\s<>\"']*)?",
+        re.IGNORECASE,
+    )
+    # Detect common obfuscated schemes without treating normal words as links.
+    obfuscated = re.compile(r"(?<!\w)h\s*t\s*t\s*p\s*(?::|：)\s*/\s*/|(?<!\w)w\s*w\s*w\s*\.", re.I)
+    if explicit_url.search(value) or bare_domain.search(value) or ip_url.search(value) or obfuscated.search(value):
         if re.search(r"(?:instagram\.com|instagr\.am)/(?:reel|reels)(?:/|\b)", value, re.IGNORECASE):
             return "Instagram Reel Link"
         if re.search(r"(?:instagram\.com|instagr\.am)/(?:p|tv)/", value, re.IGNORECASE):
             return "Instagram Post / Video Link"
         return "External Link"
-    bare_domain = re.compile(
-        r"(?<![\w@])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
-        r"(?:com|net|org|xyz|top|info|site|link|io|me|co|in|app|gg|dev|online|shop|store|"
-        r"tech|pro|live|vip|cc|biz|edu|gov)(?::\d{2,5})?(?:/[^\s<>\"']*)?",
-        re.IGNORECASE,
-    )
-    if bare_domain.search(value):
-        return "Bare Domain Link"
     return None
 
 
@@ -631,13 +630,15 @@ def start_bot():
                 if thread_id in recent_sent_texts:
                     last_text, last_time = recent_sent_texts[thread_id]
                     if last_text == text_content and (current_time - last_time < 2):
-                        return
-                recent_sent_texts[thread_id] = (text_content, current_time)
+                        return True
                 try:
                     cl.direct_send(text_content, thread_ids=[thread_id])
+                    recent_sent_texts[thread_id] = (text_content, current_time)
+                    return True
                 except Exception as e:
                     logging.exception("direct_send_failed thread_id=%s error_type=%s", thread_id, type(e).__name__)
                     print(f"[!] Send error ({type(e).__name__}); details saved in bot_runtime.log")
+                    return False
                 # No artificial delay after send; polling interval controls API request rate.
 
             def execute_kick(thread_id, target_pk, target_username, reason, silent=False):
@@ -672,7 +673,10 @@ def start_bot():
                     LAST_POLL_ERROR = "None"
                     current_time_loop = time.time()
 
-                    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+                    try:
+                        now = datetime.now(ZoneInfo(TIMEZONE_NAME))
+                    except Exception:
+                        now = datetime.now(ZoneInfo("Asia/Kolkata"))
                     current_hour = now.hour
                     current_minute = now.minute
                     current_date_str = now.strftime("%Y-%m-%d")
@@ -722,8 +726,8 @@ def start_bot():
                                 f"☕ 𝗦𝗣𝗥𝗘𝗔𝗗 𝗣𝗢𝗦𝗜𝗧𝗜𝗩𝗜𝗧𝗬 𝗜𝗡 𝗧𝗛𝗘 𝗚𝗖 🔥\n\n"
                                 f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
                             )
-                            safe_send_message(thread_id, morning_card)
-                            save_setting(morning_key, "1")
+                            if safe_send_message(thread_id, morning_card):
+                                save_setting(morning_key, "1")
 
                         if current_hour == 23 and load_setting(night_key, "0") != "1":
                             night_card = (
@@ -732,8 +736,8 @@ def start_bot():
                                 f"💫 𝗦𝗪𝗘𝗘𝗧 𝗗𝗥𝗘𝗔𝗠𝗦 𝗘𝗩𝗘𝗥𝗬𝗢𝗡𝗘 🌙\n\n"
                                 f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
                             )
-                            safe_send_message(thread_id, night_card)
-                            save_setting(night_key, "1")
+                            if safe_send_message(thread_id, night_card):
+                                save_setting(night_key, "1")
 
                         if thread_id in group_members_state:
                             old_members = group_members_state[thread_id]
@@ -963,10 +967,9 @@ def start_bot():
                                     warns, trust = ModerationEngine.add_warning(sender_username)
                                     reason = abuse_reason or f"Unauthorized {link_type}"
                                     detected_link_match = re.search(
-                                        r"(?i)(?:https?://|www\.)[^\s<>\"']+|"
-                                        r"(?<![\w@])(?:instagram\.com|instagr\.am|ig\.me|bit\.ly|tinyurl\.com|"
-                                        r"t\.me|wa\.me|youtu\.be|youtube\.com|linktr\.ee|facebook\.com|"
-                                        r"x\.com|tiktok\.com|discord\.gg|chat\.whatsapp\.com)(?:/[^\s<>\"']*)?",
+                                        r"(?i)(?<![\w@])(?:https?://|ftp://|www\.)[^\s<>\"']+|"
+                                        r"(?<![\w@])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{1,5})?(?:[/\?#][^\s<>\"']*)?|"
+                                        r"(?<![\w@])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:[/\?#][^\s<>\"']*)?",
                                         detection_text, re.IGNORECASE)
                                     detected_link = detected_link_match.group(0)[:180] if detected_link_match else "Link detected in message"
                                     ModerationEngine.log_event(thread_id, sender_username, "WARNING", reason)
@@ -1069,9 +1072,62 @@ def start_bot():
                                     elif command_lower == "!session":
                                         safe_send_message(thread_id, f"🔐 Session health\nSession ID configured: {'YES' if INSTAGRAM_SESSION_ID and INSTAGRAM_SESSION_ID not in {'PASTE_YOUR_SESSION_ID_HERE', 'PASTE_YOUR_NEW_SESSION_ID_HERE', 'YOUR_SESSION_ID_HERE'} else 'NO'}\nLast successful poll: {LAST_SUCCESSFUL_POLL or 'not yet'}\nLast error type: {LAST_POLL_ERROR}")
                                         continue
-                                    elif command_lower == "!safe_mode":
-                                        SAFE_MODE = not SAFE_MODE
-                                        safe_send_message(thread_id, f"🛡️ Safe mode is now {'ON' if SAFE_MODE else 'OFF'}. Auto-removal actions should be reviewed before use.")
+                                    elif command_token == "!safe_mode":
+                                        safe_parts = command_text.split(maxsplit=2)
+                                        safe_action = safe_parts[1].casefold() if len(safe_parts) > 1 else "toggle"
+                                        if safe_action in {"clear", "remove", "reset"}:
+                                            target = safe_parts[2].strip().split()[0].lstrip("@") if len(safe_parts) > 2 else ""
+                                            if not target:
+                                                safe_send_message(thread_id, "🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 𝗨𝗦𝗘𝗥 𝗖𝗟𝗘𝗔𝗥\n\nUsage: 𝗦𝗠𝗪🚩 !safe_mode clear @username")
+                                                continue
+                                            target_key = target.casefold()
+                                            TARGETED_USERS.discard(target_key)
+                                            SHADOWBANNED_USERS.discard(target_key)
+                                            save_runtime_state()
+                                            try:
+                                                target_uid = str(cl.user_id_from_username(target))
+                                                user_message_windows.pop(target_uid, None)
+                                                duplicate_message_windows.pop(target_uid, None)
+                                                USER_LAST_MESSAGE_TIME.pop(target_uid, None)
+                                            except Exception:
+                                                target_uid = "not resolved"
+                                            db = SessionLocal()
+                                            try:
+                                                profile = db.query(UserProfile).filter(func.lower(UserProfile.username) == target_key).first()
+                                                if profile:
+                                                    profile.warning_count = 0
+                                                    profile.trust_score = 100.0
+                                                    db.commit()
+                                            except Exception:
+                                                db.rollback()
+                                                logging.exception("safe_mode_user_clear_failed username=%s", target_key)
+                                            finally:
+                                                db.close()
+                                            ModerationEngine.log_event(thread_id, target_key, "SAFE_MODE_USER_CLEARED", f"Developer cleared user tracking; user_id={target_uid}")
+                                            safe_send_message(thread_id, f"🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 𝗨𝗦𝗘𝗥 𝗖𝗟𝗘𝗔𝗥𝗘𝗗\n\n👤 𝗨𝗦𝗘𝗥 ➜ @{target_key}\n✅ Restrictions and warning state cleared where resolvable.\n🛡️ 𝗚𝗟𝗢𝗕𝗔𝗟 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ {'ON' if SAFE_MODE else 'OFF'} (unchanged)\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
+                                        else:
+                                            SAFE_MODE = not SAFE_MODE
+                                            safe_send_message(thread_id, f"🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ {'ON' if SAFE_MODE else 'OFF'}\nUse 𝗦𝗠𝗪🚩 !safe_mode clear @username to clear one user's bot-managed restrictions without changing global Safe Mode.")
+                                        continue
+                                    elif command_token == "!safeclear":
+                                        # Alias for clearing one user's bot-managed Safe Mode/restriction state.
+                                        safe_parts = command_text.split(maxsplit=1)
+                                        target = safe_parts[1].strip().split()[0].lstrip("@") if len(safe_parts) > 1 else ""
+                                        if not target:
+                                            safe_send_message(thread_id, "Usage: 𝗦𝗠𝗪🚩 !safeclear @username")
+                                            continue
+                                        TARGETED_USERS.discard(target.casefold())
+                                        SHADOWBANNED_USERS.discard(target.casefold())
+                                        save_runtime_state()
+                                        try:
+                                            target_uid = str(cl.user_id_from_username(target))
+                                            user_message_windows.pop(target_uid, None)
+                                            duplicate_message_windows.pop(target_uid, None)
+                                            USER_LAST_MESSAGE_TIME.pop(target_uid, None)
+                                        except Exception:
+                                            target_uid = "not resolved"
+                                        ModerationEngine.log_event(thread_id, target.casefold(), "SAFE_MODE_USER_CLEARED", f"Developer cleared user tracking; user_id={target_uid}")
+                                        safe_send_message(thread_id, f"🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 𝗨𝗦𝗘𝗥 𝗖𝗟𝗘𝗔𝗥𝗘𝗗\n👤 𝗨𝗦𝗘𝗥 ➜ @{target.casefold()}\n🛡️ 𝗚𝗟𝗢𝗕𝗔𝗟 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ {'ON' if SAFE_MODE else 'OFF'} (unchanged)\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
                                         continue
                                     elif command_lower in {"!panel", "!status"}:
                                         uptime = int(time.time() - STARTED_AT)
@@ -1237,6 +1293,37 @@ def start_bot():
                                                 safe_send_message(thread_id, f"❌ Could not remove @{target}: {e}")
                                         else:
                                             safe_send_message(thread_id, "Usage: !nuke @username")
+                                        continue
+                                    elif command_token == "!kick":
+                                        # Hidden developer-only manual removal. Safe Mode blocks automatic removals,
+                                        # but never blocks an explicit, authorized developer decision.
+                                        parts = command_text.split(maxsplit=1)
+                                        target = parts[1].strip().split()[0].lstrip("@") if len(parts) > 1 else ""
+                                        if not target:
+                                            safe_send_message(thread_id, "Usage: 𝗦𝗠𝗪🚩 !kick @username")
+                                            continue
+                                        target_user = next((u for u in users if str(getattr(u, "username", "") or "").casefold() == target.casefold()), None)
+                                        target_uid = str(getattr(target_user, "pk", "") or "") if target_user else ""
+                                        canonical_username = str(getattr(target_user, "username", "") or target).lstrip("@")
+                                        if not target_uid:
+                                            try:
+                                                target_uid = str(cl.user_id_from_username(canonical_username))
+                                            except Exception:
+                                                target_uid = ""
+                                        if not target_uid:
+                                            safe_send_message(thread_id, f"❌ USER NOT FOUND\nUsername: @{canonical_username}\nThe account could not be resolved. Check the exact Instagram username.")
+                                            continue
+                                        try:
+                                            cl.user_remove_from_thread(thread_id, int(target_uid))
+                                            target_key = canonical_username.casefold()
+                                            TARGETED_USERS.discard(target_key)
+                                            SHADOWBANNED_USERS.discard(target_key)
+                                            save_runtime_state()
+                                            ModerationEngine.log_event(thread_id, target_key, "DEVELOPER_MANUAL_REMOVAL", f"Removed by authorized developer; user_id={target_uid}; Safe Mode={SAFE_MODE}")
+                                            safe_send_message(thread_id, f"🚪 MEMBER REMOVED\n👤 USERNAME ➜ @{canonical_username}\n🆔 USER ID ➜ {target_uid}\n🛡️ SAFE MODE ➜ {'ON (manual developer action allowed)' if SAFE_MODE else 'OFF'}\n👑 AUTHORIZED BY ➜ SMW🚩")
+                                        except Exception as removal_error:
+                                            logging.exception("developer_manual_removal_failed thread=%s uid=%s", thread_id, target_uid)
+                                            safe_send_message(thread_id, f"❌ REMOVAL FAILED\n👤 USERNAME ➜ @{canonical_username}\nReason: Instagram rejected the removal ({type(removal_error).__name__}). Check the bot account's group permissions and API support.")
                                         continue
                                     elif command_token in {"!clearuser", "!resetuser", "!unrestrict"}:
                                         parts = command_text.split(maxsplit=1)
