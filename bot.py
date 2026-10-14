@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 𝗦𝗠𝗪🚩 𝗚𝗥𝗢𝗨𝗣 𝗖𝗛𝗔𝗧 𝗣𝗥𝗢𝗧𝗘𝗖𝗧𝗜𝗢𝗡 𝗕𝗢𝗧
-𝗦𝗠𝗪🚩 Complete Admin-Gated Build v5.
-Preserves existing GC features and adds improved item_ack 403 diagnostics/backoff.
+𝗦𝗠𝗪🚩 Complete Admin-Gated Build v6 — safer URL moderation and auth backoff.
+Preserves the existing GC features, admin gate, cards and database. Adds more robust
+URL detection and bounded backoff for repeated Instagram 401/403 failures.
 
-Important: this handles known 403/item_ack failures safely; it cannot override
-Instagram-side access decisions. Keep the session file private and persistent.
+Important: client-side handling cannot override Instagram-side access decisions.
+Keep session credentials private and persistent.
 """
 import os
 import re
@@ -68,6 +69,7 @@ LAST_POLL_ERROR = "None"
 # Instagram item_ack 403 is not reliably recoverable client-side; pause outgoing sends
 # without logging out or stopping read/poll processing.
 SEND_COOLDOWN_UNTIL = 0.0
+AUTH_FAILURE_COUNT = 0
 SEND_COOLDOWN_SECONDS = max(300, min(1800, int(os.getenv("IG_403_SEND_COOLDOWN_SECONDS", "900"))))
 LAST_ITEM_ACK_LOG_AT = 0.0
 ITEM_ACK_LOG_INTERVAL = max(60, min(3600, int(os.getenv("IG_403_LOG_INTERVAL_SECONDS", "300"))))
@@ -539,38 +541,45 @@ def detect_abuse_reason(text: str) -> str | None:
 
 
 def detect_link_type(text: str) -> str | None:
-    """Detect common and less-common URL forms, including bare domains and IP URLs."""
+    """Detect URLs in text, including bare domains, IPs and common obfuscations.
+
+    This intentionally uses syntax-based matching rather than a fixed domain list, so
+    new domains and shortened URLs are not missed merely because they are unfamiliar.
+    """
     value = unicodedata.normalize("NFKC", str(text or "")).casefold()
     value = re.sub(r"[\u200b-\u200f\ufeff\u202a-\u202e]", "", value)
     value = value.strip()
     if not value:
         return None
 
-    # Explicit schemes and www links, including punctuation/query/fragment suffixes.
-    explicit_url = re.compile(
-        r"(?<![\w@])(?:https?://|ftp://|www\.)[^\s<>\"']+",
-        re.IGNORECASE,
-    )
-    # Any syntactically plausible domain with a 2-63 letter TLD, not a small allow-list.
-    # Also catches social links, invite links, shortened links, and newer TLDs.
+    # Normalize common deliberately obfuscated URL spellings only for detection.
+    probe = value
+    probe = re.sub(r"(?i)hxxps?\s*:\s*/\s*/", "https://", probe)
+    probe = re.sub(r"(?i)\b(h\s*t\s*t\s*p)\s*:\s*/\s*/", r"http://", probe)
+    probe = re.sub(r"(?i)\s*(?:\[\s*dot\s*\]|\(\s*dot\s*\)|\{\s*dot\s*\})\s*", ".", probe)
+    # Handle spaced '[.]' variants and a conservative ' dot ' form between domain labels.
+    probe = re.sub(r"\s*\[\s*\.\s*\]\s*", ".", probe)
+    probe = re.sub(r"(?i)([a-z0-9-])\s+dot\s+([a-z]{2,63})(?=[:/\s?#]|$)", r"\1.\2", probe)
+
+    explicit_url = re.compile(r"(?<![\w@])(?:https?://|ftp://|www\.)[^\s<>\"']+", re.I)
     bare_domain = re.compile(
         r"(?<![\w@])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
         r"[a-z]{2,63}(?::\d{1,5})?(?:[/\?#][^\s<>\"']*)?",
-        re.IGNORECASE,
+        re.I,
     )
     ip_url = re.compile(
         r"(?<![\w@])(?:https?://)?(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:[/\?#][^\s<>\"']*)?",
-        re.IGNORECASE,
+        re.I,
     )
-    # Detect common obfuscated schemes without treating normal words as links.
     obfuscated = re.compile(r"(?<!\w)h\s*t\s*t\s*p\s*(?::|：)\s*/\s*/|(?<!\w)w\s*w\s*w\s*\.", re.I)
-    if explicit_url.search(value) or bare_domain.search(value) or ip_url.search(value) or obfuscated.search(value):
-        if re.search(r"(?:instagram\.com|instagr\.am)/(?:reel|reels)(?:/|\b)", value, re.IGNORECASE):
-            return "Instagram Reel Link"
-        if re.search(r"(?:instagram\.com|instagr\.am)/(?:p|tv)/", value, re.IGNORECASE):
-            return "Instagram Post / Video Link"
-        return "External Link"
-    return None
+    has_url = bool(explicit_url.search(probe) or bare_domain.search(probe) or ip_url.search(probe) or obfuscated.search(probe))
+    if not has_url:
+        return None
+    if re.search(r"(?:instagram\.com|instagr\.am)/(?:reel|reels)(?:/|\b)", probe, re.I):
+        return "Instagram Reel Link"
+    if re.search(r"(?:instagram\.com|instagr\.am)/(?:p|tv)/", probe, re.I):
+        return "Instagram Post / Video Link"
+    return "External Link"
 
 
 def get_message_detection_text(message, plain_text: str = "") -> str:
@@ -651,7 +660,7 @@ def _instagram_error_signature(exc):
 
 
 def start_bot():
-    global LOCKDOWN_MODE, SHADOWBANNED_USERS, TARGETED_USERS, USER_LAST_MESSAGE_TIME, SAFE_MODE, ANTISPAM_ENABLED, ANTISPAM_LIMIT, SEND_COOLDOWN_UNTIL
+    global LOCKDOWN_MODE, SHADOWBANNED_USERS, TARGETED_USERS, USER_LAST_MESSAGE_TIME, SAFE_MODE, ANTISPAM_ENABLED, ANTISPAM_LIMIT, SEND_COOLDOWN_UNTIL, AUTH_FAILURE_COUNT
     init_db()
     restore_runtime_state()
 
@@ -737,6 +746,7 @@ def start_bot():
             print("║       STATUS: CONNECTED              ║")
             print("║   Group scan loop: STARTING          ║")
             print("╚══════════════════════════════════════╝\n")
+            AUTH_FAILURE_COUNT = 0
             print(f"[+] BOT @{BOT_USERNAME} logged in; polling every {POLL_INTERVAL}s; scanning up to {THREAD_SCAN_AMOUNT} recent threads per poll.")
             print("[i] 𝗦𝗠𝗪🚩 Admin-gated mode enabled. Instagram 403s are handled with cooldowns; they cannot be bypassed locally.")
 
@@ -1775,10 +1785,34 @@ def start_bot():
             return
         except Exception as e:
             LAST_POLL_ERROR = type(e).__name__
+            http_status, api_status_code, error_code, action = _instagram_error_signature(e)
+            error_text = str(e).casefold()
+            is_unauthorized = (
+                http_status == 401 or api_status_code == 401
+                or "401 client error" in error_text
+                or "unauthorized for url" in error_text
+                or "clientunauthorizederror" in type(e).__name__.casefold()
+            )
+            if is_unauthorized:
+                AUTH_FAILURE_COUNT += 1
+                # Do not hammer Instagram's GraphQL endpoint with repeated logins.
+                # 5m, 10m, 20m, then cap at 30m; successful connection resets this counter.
+                backoff_seconds = min(300 * (2 ** min(AUTH_FAILURE_COUNT - 1, 3)), 1800)
+                LAST_POLL_ERROR = f"Instagram authentication rejected (401); retry in {backoff_seconds}s"
+                logging.error(
+                    "instagram_auth_401 retry_backoff_seconds=%s consecutive_failures=%s exception_type=%s",
+                    backoff_seconds, AUTH_FAILURE_COUNT, type(e).__name__
+                )
+                print(
+                    f"[!] Instagram returned 401 Unauthorized ({type(e).__name__}). "
+                    f"Pausing {backoff_seconds}s before retry; check whether the Session ID is still valid. "
+                    "The bot will not repeatedly log in every few seconds."
+                )
+                time.sleep(backoff_seconds)
+                continue
             logging.exception("critical_connection_or_login_error")
             print(f"[!] Critical error: {type(e).__name__}: {e}")
-            # Do not hot-loop authentication failures; restart the outer connection cycle.
-            time.sleep(5)
+            time.sleep(min(60, POLL_INTERVAL * 2))
 
 
 if __name__ == "__main__":
