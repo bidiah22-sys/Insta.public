@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 𝗦𝗠𝗪🚩 𝗚𝗥𝗢𝗨𝗣 𝗖𝗛𝗔𝗧 𝗣𝗥𝗢𝗧𝗘𝗖𝗧𝗜𝗢𝗡 𝗕𝗢𝗧
-Admin-gated build with conservative Instagram 403 handling.
+𝗦𝗠𝗪🚩 Complete Admin-Gated Build v5.
+Preserves existing GC features and adds improved item_ack 403 diagnostics/backoff.
 
 Important: this handles known 403/item_ack failures safely; it cannot override
 Instagram-side access decisions. Keep the session file private and persistent.
@@ -19,6 +20,8 @@ from pathlib import Path
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
+from importlib.metadata import version as _package_version
+
 from instagrapi import Client
 from instagrapi.exceptions import (
     PleaseWaitFewMinutes,
@@ -599,7 +602,7 @@ def get_message_detection_text(message, plain_text: str = "") -> str:
 
 
 def _instagram_error_signature(exc):
-    """Return only sanitized Instagram response fields useful for error routing."""
+    """Extract a minimal error signature from response JSON or serialized exception text."""
     response = getattr(exc, "response", None)
     body = {}
     if response is not None:
@@ -609,6 +612,21 @@ def _instagram_error_signature(exc):
                 body = parsed
         except Exception:
             body = {}
+
+    # Some instagrapi exceptions preserve the API body in str(exc) but expose no response.
+    # Parse only the known fields; never log cookies, headers, or session identifiers.
+    if not body:
+        raw = str(exc)
+        try:
+            start = raw.find("{")
+            end = raw.rfind("}")
+            if start >= 0 and end > start:
+                candidate = json.loads(raw[start:end + 1])
+                if isinstance(candidate, dict):
+                    body = candidate
+        except Exception:
+            body = {}
+
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
     try:
         http_status = int(getattr(response, "status_code", 0) or 0)
@@ -618,11 +636,17 @@ def _instagram_error_signature(exc):
         api_status_code = int(body.get("status_code", 0) or 0)
     except Exception:
         api_status_code = 0
+    # Instagram's item_ack payload has appeared with error_code at the top level,
+    # while some wrappers may nest it inside payload. Check both shapes.
     try:
-        error_code = int(payload.get("error_code", 0) or 0)
+        error_code = int(body.get("error_code", payload.get("error_code", 0)) or 0)
     except Exception:
-        error_code = 0
-    action = body.get("action") if body.get("action") in {"item_ack"} else ""
+        try:
+            error_code = int(payload.get("error_code", 0) or 0)
+        except Exception:
+            error_code = 0
+    action = body.get("action") if body.get("action") == "item_ack" else ""
+    # If status code is embedded only in the serialized body, retain it above.
     return http_status, api_status_code, error_code, action
 
 
@@ -633,7 +657,12 @@ def start_bot():
 
     while True:
         try:
-            print("[*] Connecting to Instagram...")
+            try:
+                installed_instagrapi = _package_version("instagrapi")
+            except Exception:
+                installed_instagrapi = "unknown"
+            print(f"[*] Connecting to Instagram... (instagrapi={installed_instagrapi})")
+            logging.info("startup_instagram_library_version=%s", installed_instagrapi)
             cl = Client()
             # Reuse saved device/session settings when available. The file must live on
             # persistent storage (for example, a Railway Volume) to survive redeploys.
@@ -1699,15 +1728,18 @@ def start_bot():
                     error_text = str(e).lower()
                     http_status, api_status_code, error_code, action = _instagram_error_signature(e)
                     if (http_status == 403 or api_status_code == 403) and action == "item_ack" and error_code == 1404006:
-                        # Back off the poll itself and rate-limit duplicate warning output.
+                        # A 403 is a server rejection, not a transient local exception. Back off
+                        # the polling call itself, not only outgoing replies. Never relogin/resend.
                         consecutive_forbidden_errors += 1
-                        backoff_seconds = min(300 * (2 ** (consecutive_forbidden_errors - 1)), 1800)
-                        SEND_COOLDOWN_UNTIL = max(
-                            SEND_COOLDOWN_UNTIL,
-                            time.time() + max(SEND_COOLDOWN_SECONDS, backoff_seconds)
-                        )
+                        backoff_seconds = min(300 * (2 ** min(consecutive_forbidden_errors - 1, 3)), 1800)
+                        SEND_COOLDOWN_UNTIL = max(SEND_COOLDOWN_UNTIL, time.time() + backoff_seconds)
+                        LAST_POLL_ERROR = f"item_ack 403/1404006; poll retry in {backoff_seconds}s"
                         _pause_after_item_ack_403(e, "poll_loop")
-                        logging.info("poll_backoff_seconds=%s consecutive_forbidden_errors=%s", backoff_seconds, consecutive_forbidden_errors)
+                        logging.warning(
+                            "poll_backoff_seconds=%s consecutive_forbidden_errors=%s",
+                            backoff_seconds, consecutive_forbidden_errors
+                        )
+                        print(f"[!] Polling paused for {backoff_seconds}s after item_ack 403; session kept, no automatic login/resend.")
                         time.sleep(backoff_seconds)
                         continue
                     is_forbidden_403 = (
@@ -1719,7 +1751,7 @@ def start_bot():
                     if is_forbidden_403:
                         consecutive_forbidden_errors += 1
                         # 5m, 10m, 20m, then cap at 30m between retries.
-                        backoff_seconds = min(300 * (2 ** (consecutive_forbidden_errors - 1)), 1800)
+                        backoff_seconds = min(300 * (2 ** min(consecutive_forbidden_errors - 1, 3)), 1800)
                         LAST_POLL_ERROR = f"{type(e).__name__} (403); retry in {backoff_seconds}s"
                         logging.error(
                             "Instagram returned 403/forbidden during polling; keeping the process alive, "
