@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 𝗦𝗠𝗪🚩 𝗚𝗥𝗢𝗨𝗣 𝗖𝗛𝗔𝗧 𝗣𝗥𝗢𝗧𝗘𝗖𝗧𝗜𝗢𝗡 𝗕𝗢𝗧
-𝗦𝗠𝗪🚩 Complete Admin-Gated Build v6 — safer URL moderation and auth backoff.
-Preserves the existing GC features, admin gate, cards and database. Adds more robust
-URL detection and bounded backoff for repeated Instagram 401/403 failures.
+𝗦𝗠𝗪🚩 Complete Admin-Gated Build v7 — per-message crash isolation and shared-link detection.
+Preserves the existing GC features, admin gate, cards and database. Adds defensive shared-link extraction, per-message exception isolation, and bounded backoff
+for repeated Instagram 401/403 failures.
 
 Important: client-side handling cannot override Instagram-side access decisions.
 Keep session credentials private and persistent.
@@ -55,7 +55,7 @@ OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(10, min(60, int(os.getenv("POLL_INTERVAL", "12"))))  # Fast but bounded polling; avoid aggressive API loops
+POLL_INTERVAL = max(1, min(60, int(os.getenv("POLL_INTERVAL", "2"))))  # Fast but bounded polling; avoid aggressive API loops
 THREAD_SCAN_AMOUNT = max(20, min(500, int(os.getenv("THREAD_SCAN_AMOUNT", "100"))))
 TIMEZONE_NAME = os.getenv("TIMEZONE", "Asia/Kolkata")
 SEEN_MESSAGE_CACHE_LIMIT = 5000
@@ -541,73 +541,89 @@ def detect_abuse_reason(text: str) -> str | None:
 
 
 def detect_link_type(text: str) -> str | None:
-    """Detect URLs in text, including bare domains, IPs and common obfuscations.
-
-    This intentionally uses syntax-based matching rather than a fixed domain list, so
-    new domains and shortened URLs are not missed merely because they are unfamiliar.
-    """
-    value = unicodedata.normalize("NFKC", str(text or "")).casefold()
-    value = re.sub(r"[\u200b-\u200f\ufeff\u202a-\u202e]", "", value)
-    value = value.strip()
-    if not value:
+    """Fail-safe URL detector. Malformed/unusual message data never escapes this function."""
+    try:
+        value = unicodedata.normalize("NFKC", str(text or "")).casefold()
+        value = re.sub(r"[\u200b-\u200f\ufeff\u202a-\u202e]", "", value).strip()
+        if not value:
+            return None
+        probe = value
+        probe = re.sub(r"(?i)hxxps?\s*:\s*/\s*/", "https://", probe)
+        probe = re.sub(r"(?i)\b(h\s*t\s*t\s*p)\s*:\s*/\s*/", r"http://", probe)
+        probe = re.sub(r"(?i)\s*(?:\[\s*dot\s*\]|\(\s*dot\s*\)|\{\s*dot\s*\})\s*", ".", probe)
+        probe = re.sub(r"\s*\[\s*\.\s*\]\s*", ".", probe)
+        probe = re.sub(r"(?i)([a-z0-9-])\s+dot\s+([a-z]{2,63})(?=[:/\s?#]|$)", r"\1.\2", probe)
+        # URLs, domains (including unfamiliar TLDs), IP URLs, and common obfuscations.
+        explicit = re.compile(r"(?<![\w@])(?:https?://|ftp://|www\.)[^\s<>\"']+", re.I)
+        domain = re.compile(r"(?<![\w@])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{1,5})?(?:[/\?#][^\s<>\"']*)?", re.I)
+        ip_url = re.compile(r"(?<![\w@])(?:https?://)?(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:[/\?#][^\s<>\"']*)?", re.I)
+        obfuscated = re.compile(r"(?<!\w)h\s*t\s*t\s*p\s*(?::|：)\s*/\s*/|(?<!\w)w\s*w\s*w\s*\.", re.I)
+        if not (explicit.search(probe) or domain.search(probe) or ip_url.search(probe) or obfuscated.search(probe)):
+            return None
+        if re.search(r"(?:instagram\.com|instagr\.am)/(?:reel|reels)(?:/|\b)", probe, re.I):
+            return "Instagram Reel Link"
+        if re.search(r"(?:instagram\.com|instagr\.am)/(?:p|tv)/", probe, re.I):
+            return "Instagram Post / Video Link"
+        if re.search(r"(?:instagram\.com|instagr\.am)/(?:channels?|broadcast|direct)/", probe, re.I):
+            return "Instagram Channel / Broadcast Link"
+        return "External Link"
+    except Exception:
+        logging.exception("link_detector_error")
         return None
-
-    # Normalize common deliberately obfuscated URL spellings only for detection.
-    probe = value
-    probe = re.sub(r"(?i)hxxps?\s*:\s*/\s*/", "https://", probe)
-    probe = re.sub(r"(?i)\b(h\s*t\s*t\s*p)\s*:\s*/\s*/", r"http://", probe)
-    probe = re.sub(r"(?i)\s*(?:\[\s*dot\s*\]|\(\s*dot\s*\)|\{\s*dot\s*\})\s*", ".", probe)
-    # Handle spaced '[.]' variants and a conservative ' dot ' form between domain labels.
-    probe = re.sub(r"\s*\[\s*\.\s*\]\s*", ".", probe)
-    probe = re.sub(r"(?i)([a-z0-9-])\s+dot\s+([a-z]{2,63})(?=[:/\s?#]|$)", r"\1.\2", probe)
-
-    explicit_url = re.compile(r"(?<![\w@])(?:https?://|ftp://|www\.)[^\s<>\"']+", re.I)
-    bare_domain = re.compile(
-        r"(?<![\w@])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
-        r"[a-z]{2,63}(?::\d{1,5})?(?:[/\?#][^\s<>\"']*)?",
-        re.I,
-    )
-    ip_url = re.compile(
-        r"(?<![\w@])(?:https?://)?(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:[/\?#][^\s<>\"']*)?",
-        re.I,
-    )
-    obfuscated = re.compile(r"(?<!\w)h\s*t\s*t\s*p\s*(?::|：)\s*/\s*/|(?<!\w)w\s*w\s*w\s*\.", re.I)
-    has_url = bool(explicit_url.search(probe) or bare_domain.search(probe) or ip_url.search(probe) or obfuscated.search(probe))
-    if not has_url:
-        return None
-    if re.search(r"(?:instagram\.com|instagr\.am)/(?:reel|reels)(?:/|\b)", probe, re.I):
-        return "Instagram Reel Link"
-    if re.search(r"(?:instagram\.com|instagr\.am)/(?:p|tv)/", probe, re.I):
-        return "Instagram Post / Video Link"
-    return "External Link"
 
 
 def get_message_detection_text(message, plain_text: str = "") -> str:
-    """Collect visible text plus URL-bearing fields used by shared-link message objects."""
-    parts = [str(plain_text or "")]
-    for field in ("link", "url", "href", "caption", "title", "text"):
+    """Safely extract link-bearing fields from ordinary and shared-link message payloads."""
+    parts = []
+    seen = set()
+    def add(value):
         try:
-            item = getattr(message, field, None)
-            if isinstance(item, str) and item.strip() and item not in parts:
-                parts.append(item)
-            elif isinstance(item, dict):
-                for key in ("url", "href", "link", "webUri", "web_uri", "caption", "title"):
-                    val = item.get(key)
-                    if isinstance(val, str) and val.strip():
-                        parts.append(val)
+            if isinstance(value, str):
+                item = value.strip()
+                if item and item not in seen:
+                    seen.add(item)
+                    parts.append(item)
         except Exception:
             pass
-    try:
-        extra = getattr(message, "extra", None)
-        if isinstance(extra, dict):
-            for key in ("url", "href", "link", "webUri", "web_uri", "caption", "title"):
-                val = extra.get(key)
-                if isinstance(val, str) and val.strip():
-                    parts.append(val)
-    except Exception:
-        pass
+    add(plain_text)
+    keys = {"url", "href", "link", "weburi", "web_uri", "caption", "title", "text", "share_url", "permalink", "shortcode"}
+    def walk(obj, depth=0):
+        if depth > 5 or obj is None:
+            return
+        try:
+            if isinstance(obj, str):
+                # Avoid treating arbitrary huge serialized blobs as message text.
+                if len(obj) <= 10000:
+                    add(obj)
+                return
+            if isinstance(obj, dict):
+                for key, val in obj.items():
+                    if str(key).casefold() in keys:
+                        if isinstance(val, str): add(val)
+                        elif isinstance(val, (dict, list, tuple)): walk(val, depth + 1)
+                    elif isinstance(val, (dict, list, tuple)):
+                        walk(val, depth + 1)
+                return
+            if isinstance(obj, (list, tuple)):
+                for item in obj[:100]: walk(item, depth + 1)
+                return
+            # Only inspect known message containers; avoid walking arbitrary client objects.
+            for field in ("link", "url", "href", "caption", "title", "text", "extra", "share", "media", "clip", "reel", "item", "payload", "message"):
+                try:
+                    val = getattr(obj, field, None)
+                    if isinstance(val, str): add(val)
+                    elif isinstance(val, (dict, list, tuple)): walk(val, depth + 1)
+                except Exception:
+                    continue
+            try:
+                data = obj.dict()
+                if isinstance(data, dict): walk(data, depth + 1)
+            except Exception:
+                pass
+        except Exception:
+            logging.debug("shared_link_field_extract_skipped", exc_info=True)
+    walk(message)
     return " ".join(parts)
-
 
 
 def _instagram_error_signature(exc):
@@ -1016,252 +1032,288 @@ def start_bot():
                             continue
 
                         for last_msg in reversed(messages):
-                            message_id = str(getattr(last_msg, "id", "") or "")
+                            try:
+                                message_id = str(getattr(last_msg, "id", "") or "")
 
-                            if message_id and message_id not in seen_message_ids:
-                                seen_message_ids.add(message_id)
-                                seen_message_order.append(message_id)
-                                if len(seen_message_order) > SEEN_MESSAGE_CACHE_LIMIT:
-                                    expired_id = seen_message_order.popleft()
-                                    seen_message_ids.discard(expired_id)
-                                TOTAL_SEEN_MESSAGES += 1
+                                if message_id and message_id not in seen_message_ids:
+                                    seen_message_ids.add(message_id)
+                                    seen_message_order.append(message_id)
+                                    if len(seen_message_order) > SEEN_MESSAGE_CACHE_LIMIT:
+                                        expired_id = seen_message_order.popleft()
+                                        seen_message_ids.discard(expired_id)
+                                    TOTAL_SEEN_MESSAGES += 1
 
-                                text = str(getattr(last_msg, "text", "") or "").strip()
-                                text_lower = text.lower()
-                                # Management commands must use the exact SMW prefix.
-                                # Example: 𝗦𝗠𝗪🚩 !help
-                                command_prefix_present = text.startswith("𝗦𝗠𝗪🚩 !")
-                                command_text = text[len("𝗦𝗠𝗪🚩"):].strip() if command_prefix_present else ""
-                                command_lower = command_text.lower()
-                                command_token = command_lower.split(maxsplit=1)[0] if command_lower else ""
-                                sender_id = str(getattr(last_msg, "user_id", ""))
+                                    text = str(getattr(last_msg, "text", "") or "").strip()
+                                    text_lower = text.lower()
+                                    # Management commands must use the exact SMW prefix.
+                                    # Example: 𝗦𝗠𝗪🚩 !help
+                                    command_prefix_present = text.startswith("𝗦𝗠𝗪🚩 !")
+                                    command_text = text[len("𝗦𝗠𝗪🚩"):].strip() if command_prefix_present else ""
+                                    command_lower = command_text.lower()
+                                    command_token = command_lower.split(maxsplit=1)[0] if command_lower else ""
+                                    sender_id = str(getattr(last_msg, "user_id", ""))
 
-                                sender_username = ""
-                                message_user = getattr(last_msg, "user", None)
-                                embedded_username = getattr(message_user, "username", None)
-                                if embedded_username:
-                                    sender_username = str(embedded_username).strip().lstrip("@")
-                                else:
-                                    for u in users:
-                                        if str(getattr(u, "pk", "")) == sender_id:
-                                            candidate = getattr(u, "username", None)
+                                    sender_username = ""
+                                    message_user = getattr(last_msg, "user", None)
+                                    embedded_username = getattr(message_user, "username", None)
+                                    if embedded_username:
+                                        sender_username = str(embedded_username).strip().lstrip("@")
+                                    else:
+                                        for u in users:
+                                            if str(getattr(u, "pk", "")) == sender_id:
+                                                candidate = getattr(u, "username", None)
+                                                if candidate:
+                                                    sender_username = str(candidate).strip().lstrip("@")
+                                                break
+                                    # Resolve missing usernames through the logged-in client and cache them.
+                                    if not sender_username and sender_id in username_by_id_cache:
+                                        sender_username = username_by_id_cache[sender_id]
+                                    if not sender_username and sender_id:
+                                        try:
+                                            profile_info = cl.user_info(int(sender_id))
+                                            candidate = getattr(profile_info, "username", None)
                                             if candidate:
                                                 sender_username = str(candidate).strip().lstrip("@")
-                                            break
-                                # Resolve missing usernames through the logged-in client and cache them.
-                                if not sender_username and sender_id in username_by_id_cache:
-                                    sender_username = username_by_id_cache[sender_id]
-                                if not sender_username and sender_id:
-                                    try:
-                                        profile_info = cl.user_info(int(sender_id))
-                                        candidate = getattr(profile_info, "username", None)
-                                        if candidate:
-                                            sender_username = str(candidate).strip().lstrip("@")
-                                    except Exception as username_error:
-                                        logging.warning("username_lookup_failed uid=%s error=%s", sender_id, type(username_error).__name__)
-                                if not sender_username:
-                                    # Do not silently label an unidentified offender as a generic 'User'.
-                                    sender_username = f"unknown_user_{sender_id}" if sender_id else "unknown_user_id_unavailable"
-                                if sender_id:
-                                    username_by_id_cache[sender_id] = sender_username
+                                        except Exception as username_error:
+                                            logging.warning("username_lookup_failed uid=%s error=%s", sender_id, type(username_error).__name__)
+                                    if not sender_username:
+                                        # Do not silently label an unidentified offender as a generic 'User'.
+                                        sender_username = f"unknown_user_{sender_id}" if sender_id else "unknown_user_id_unavailable"
+                                    if sender_id:
+                                        username_by_id_cache[sender_id] = sender_username
 
-                                if sender_id == bot_pk:
-                                    continue
+                                    if sender_id == bot_pk:
+                                        continue
 
-                                admin_ids_str = {str(x) for x in gc_admins}
-                                is_sender_admin = sender_id in admin_ids_str
-                                is_dev = sender_username.lstrip("@").casefold() in {d.lstrip("@").casefold() for d in AUTHORIZED_DEVS}
+                                    admin_ids_str = {str(x) for x in gc_admins}
+                                    is_sender_admin = sender_id in admin_ids_str
+                                    is_dev = sender_username.lstrip("@").casefold() in {d.lstrip("@").casefold() for d in AUTHORIZED_DEVS}
 
-                                ModerationEngine.record_activity(sender_id, sender_username)
-                                record_group_message(thread_id, str(gc_name), sender_id, sender_username)
-                                logging.info("message_seen thread=%s user=%s", thread_id, sender_username)
+                                    ModerationEngine.record_activity(sender_id, sender_username)
+                                    record_group_message(thread_id, str(gc_name), sender_id, sender_username)
+                                    logging.info("message_seen thread=%s user=%s", thread_id, sender_username)
 
-                                if ANTISPAM_ENABLED and text and sender_username.casefold() not in {d.casefold() for d in AUTHORIZED_DEVS}:
-                                    normalized_msg = re.sub(r"\s+", " ", text.casefold()).strip()
-                                    if normalized_msg and not command_prefix_present:
-                                        recent = [item for item in duplicate_message_windows.get(sender_id, []) if current_time_loop - item[0] < 60]
-                                        recent.append((current_time_loop, normalized_msg))
-                                        duplicate_message_windows[sender_id] = recent[-12:]
-                                        repeats = sum(1 for _, item in recent if item == normalized_msg)
-                                        if repeats >= ANTISPAM_LIMIT and sender_id not in {str(x) for x in gc_admins} and sender_username.casefold() not in {d.casefold() for d in AUTHORIZED_DEVS}:
-                                            reason = f"Repeated text spam ({repeats} identical messages in 60s)"
-                                            ModerationEngine.log_event(thread_id, sender_username, "ANTI_SPAM_ALERT", reason)
-                                            safe_send_message(thread_id, f"🛡️ 𝗔𝗡𝗧𝗜-𝗦𝗣𝗔𝗠 𝗔𝗟𝗘𝗥𝗧\n👤 USER ➜ {fix_mention(sender_username)}\n⚠️ {reason}\n📢 Admin review required.")
-                                            duplicate_message_windows[sender_id] = []
+                                    if ANTISPAM_ENABLED and text and sender_username.casefold() not in {d.casefold() for d in AUTHORIZED_DEVS}:
+                                        normalized_msg = re.sub(r"\s+", " ", text.casefold()).strip()
+                                        if normalized_msg and not command_prefix_present:
+                                            recent = [item for item in duplicate_message_windows.get(sender_id, []) if current_time_loop - item[0] < 60]
+                                            recent.append((current_time_loop, normalized_msg))
+                                            duplicate_message_windows[sender_id] = recent[-12:]
+                                            repeats = sum(1 for _, item in recent if item == normalized_msg)
+                                            if repeats >= ANTISPAM_LIMIT and sender_id not in {str(x) for x in gc_admins} and sender_username.casefold() not in {d.casefold() for d in AUTHORIZED_DEVS}:
+                                                reason = f"Repeated text spam ({repeats} identical messages in 60s)"
+                                                ModerationEngine.log_event(thread_id, sender_username, "ANTI_SPAM_ALERT", reason)
+                                                safe_send_message(thread_id, f"🛡️ 𝗔𝗡𝗧𝗜-𝗦𝗣𝗔𝗠 𝗔𝗟𝗘𝗥𝗧\n👤 USER ➜ {fix_mention(sender_username)}\n⚠️ {reason}\n📢 Admin review required.")
+                                                duplicate_message_windows[sender_id] = []
+                                                continue
+
+                                    if LOCKDOWN_MODE and not is_dev and not is_sender_admin:
+                                        execute_kick(thread_id, sender_id, sender_username, "LOCKDOWN ACTIVE")
+                                        continue
+
+                                    if sender_username.lower() in TARGETED_USERS:
+                                        execute_kick(thread_id, sender_id, sender_username, "TARGET ELIMINATED")
+                                        continue
+
+                                    if sender_username.lower() in SHADOWBANNED_USERS:
+                                        execute_kick(thread_id, sender_id, sender_username, "SHADOWBANNED", silent=True)
+                                        continue
+
+                                    if not is_dev and not is_sender_admin:
+                                        window = [t for t in user_message_windows.get(sender_id, []) if current_time_loop - t < 12]
+                                        window.append(current_time_loop)
+                                        user_message_windows[sender_id] = window[-12:]
+                                        USER_LAST_MESSAGE_TIME[sender_id] = current_time_loop
+                                        if len(window) >= 7:
+                                            warns, trust = ModerationEngine.add_warning(sender_username)
+                                            ModerationEngine.log_event(thread_id, sender_username, "FLOOD_WARNING", f"{len(window)} messages in 12 seconds")
+                                            user_message_windows[sender_id] = []
+                                            safe_send_message(thread_id, f"⚠️ {fix_mention(sender_username)} slow down please. Flood warning {warns}/3; admins have been notified.")
                                             continue
 
-                                if LOCKDOWN_MODE and not is_dev and not is_sender_admin:
-                                    execute_kick(thread_id, sender_id, sender_username, "LOCKDOWN ACTIVE")
-                                    continue
+                                    if command_prefix_present and command_lower == "!rules":
+                                        rules_card = (
+                                            f"⚜🌷 𝗚𝗖 𝗥𝗨𝗟𝗘𝗦 • 𝗣𝗟𝗘𝗔𝗦𝗘 𝗥𝗘𝗔𝗗 🌷⚜️\n\n"
+                                            f"🤝 𝗥𝗘𝗦𝗣𝗘𝗖𝗧 𝗘𝗩𝗘𝗥𝗬𝗢𝗡𝗘\n"
+                                            f"💌 𝗞𝗘𝗘𝗣 𝗧𝗛𝗘 𝗩𝗜𝗕𝗘 𝗙𝗥𝗜𝗘𝗡𝗗𝗟𝗬\n\n"
+                                            f"🚫 𝗡𝗢 𝗔𝗕𝗨𝗦𝗘 • 𝗡𝗢 𝗧𝗢𝗫𝗜𝗖𝗜𝗧𝗬\n"
+                                            f"⚠️ 𝗗𝗥𝗔𝗠𝗔 & 𝗙𝗜𝗚𝗛𝗧𝗦 𝗔𝗥𝗘 𝗡𝗢𝗧 𝗔𝗟𝗟𝗢𝗪𝗘𝗗\n\n"
+                                            f"🔞 𝗡𝗢 𝗡𝗦𝗙𝗪 / 𝗔𝗗𝗨𝗟𝗧 𝗖𝗢𝗡𝗧𝗘𝗡𝗧\n"
+                                            f"🛡️ 𝗞𝗘𝗘𝗣 𝗧𝗛𝗘 𝗚𝗖 𝗖𝗟𝗘𝗔𝗡\n\n"
+                                            f"📢 𝗡𝗢 𝗦𝗣𝗔𝗠 • 𝗡𝗢 𝗙𝗟𝗢𝗢𝗗𝗜𝗡𝗚\n"
+                                            f"🚫 𝗗𝗢𝗡'𝗧 𝗦𝗘𝗡𝗗 𝗥𝗘𝗣𝗘𝗔𝗧𝗘𝗗 𝗠𝗘𝗦𝗦𝗔𝗚𝗘𝗦\n\n"
+                                            f"🔗 𝗡𝗢 𝗨𝗡𝗔𝗨𝗧𝗛𝗢𝗥𝗜𝗭𝗘𝗗 𝗟𝗜𝗡𝗞𝗦\n"
+                                            f"📩 𝗔𝗦𝗞 𝗔𝗗𝗠𝗜𝗡𝗦 𝗙𝗜𝗥𝗦𝗧\n\n"
+                                            f"👑 𝗥𝗘𝗦𝗣𝗘𝗖𝗧 𝗔𝗗𝗠𝗜𝗡𝗦 & 𝗠𝗢𝗗𝗘𝗥𝗔𝗧𝗢𝗥𝗦\n"
+                                            f"✨ 𝗙𝗢𝗟𝗟𝗢𝗪 𝗢𝗙𝗙𝗜𝗖𝗜𝗔𝗟 𝗜𝗡𝗦𝗧𝗥𝗨𝗖𝗧𝗜𝗢𝗡𝗦\n\n"
+                                            f"⚠️ 𝗥𝗨𝗟𝗘𝗦 𝗕𝗥𝗘𝗔𝗞 = 𝗪𝗔𝗥𝗡𝗜𝗡𝗚\n"
+                                            f"🚫 𝗥𝗘𝗣𝗘𝗔𝗧𝗘𝗗 𝗩𝗜𝗢𝗟𝗔𝗧𝗜𝗢𝗡𝗦 = 𝗥𝗘𝗠𝗢𝗩𝗔𝗟\n\n"
+                                            f"🌷 𝗦𝗧𝗔𝗬 𝗔𝗖𝗧𝗜𝗩𝗘 • 𝗦𝗧𝗔𝗬 𝗥𝗘𝗦𝗣𝗘𝗖𝗧𝗙𝗨𝗟 🌷\n"
+                                            f"💫 𝗘𝗡𝗝𝗢𝗬 • 𝗖𝗛𝗔𝗧 • 𝗚𝗥𝗢𝗪 • 𝗖𝗢𝗡𝗡𝗘𝗖𝗧 💫\n\n"
+                                            f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
+                                        )
+                                        safe_send_message(thread_id, rules_card)
+                                        continue
 
-                                if sender_username.lower() in TARGETED_USERS:
-                                    execute_kick(thread_id, sender_id, sender_username, "TARGET ELIMINATED")
-                                    continue
-
-                                if sender_username.lower() in SHADOWBANNED_USERS:
-                                    execute_kick(thread_id, sender_id, sender_username, "SHADOWBANNED", silent=True)
-                                    continue
-
-                                if not is_dev and not is_sender_admin:
-                                    window = [t for t in user_message_windows.get(sender_id, []) if current_time_loop - t < 12]
-                                    window.append(current_time_loop)
-                                    user_message_windows[sender_id] = window[-12:]
-                                    USER_LAST_MESSAGE_TIME[sender_id] = current_time_loop
-                                    if len(window) >= 7:
+                                    abuse_reason = detect_abuse_reason(text)
+                                    detection_text = get_message_detection_text(last_msg, text)
+                                    link_type = detect_link_type(detection_text)
+                                    link_violation = bool(link_type)
+                                    if abuse_reason or link_violation:
                                         warns, trust = ModerationEngine.add_warning(sender_username)
-                                        ModerationEngine.log_event(thread_id, sender_username, "FLOOD_WARNING", f"{len(window)} messages in 12 seconds")
-                                        user_message_windows[sender_id] = []
-                                        safe_send_message(thread_id, f"⚠️ {fix_mention(sender_username)} slow down please. Flood warning {warns}/3; admins have been notified.")
+                                        reason = abuse_reason or f"Unauthorized {link_type}"
+                                        detected_link_match = re.search(
+                                            r"(?i)(?<![\w@])(?:https?://|ftp://|www\.)[^\s<>\"']+|"
+                                            r"(?<![\w@])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{1,5})?(?:[/\?#][^\s<>\"']*)?|"
+                                            r"(?<![\w@])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:[/\?#][^\s<>\"']*)?",
+                                            detection_text, re.IGNORECASE)
+                                        detected_link = detected_link_match.group(0)[:180] if detected_link_match else "Link detected in message"
+                                        ModerationEngine.log_event(thread_id, sender_username, "WARNING", reason)
+
+                                        if warns >= 2 and not (is_dev or is_sender_admin):
+                                            execute_kick(thread_id, sender_id, sender_username, f"Second Violation ({reason})")
+                                        elif warns >= 2:
+                                            safe_send_message(thread_id, f"🚨 Repeat abuse alert for {fix_mention(sender_username)}. Admin review required; no automatic removal for privileged accounts.")
+                                        else:
+                                            warn_heading = (
+                                                "⚠️ **𝗔𝗕𝗨𝗦𝗜𝗡𝗚 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!** ⚠️\n\n" if abuse_reason else
+                                                ("🎬🔗 **𝗜𝗡𝗦𝗧𝗔𝗚𝗥𝗔𝗠 𝗥𝗘𝗘𝗟 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!** 🔗🎬\n\n" if link_type == "Instagram Reel Link" else "⚠️🚨 **𝗚𝗖 𝗦𝗔𝗙𝗘𝗧𝗬 𝗔𝗟𝗘𝗥𝗧!** 🚨⚠️\n\n")
+                                            )
+                                            warn_card = (
+                                                warn_heading
+                                                + f"👤 𝗢𝗙𝗙𝗘𝗡𝗗𝗘𝗥 ➜ {fix_mention(sender_username)}\n"
+                                                + f"🆔 𝗨𝗦𝗘𝗥 𝗜𝗗 ➜ {sender_id or 'Unavailable'}\n"
+                                                + (f"🔗 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗 𝗟𝗜𝗡𝗞 ➜ {detected_link}\n" if link_violation else "")
+                                                + f"🚫 𝗥𝗘𝗔𝗦𝗢𝗡   ➜ {reason}\n"
+                                                + f"⚠️ 𝗪𝗔𝗥𝗡𝗜𝗡𝗚𝗦 ➜ {warns}/2\n"
+                                                + f"📉 𝗧𝗥𝗨𝗦𝗧 𝗦𝗖𝗢𝗥𝗘 ➜ {trust}%\n\n"
+                                                + f"📢 **𝗔𝗗𝗠𝗜𝗡 𝗔𝗟𝗘𝗥𝗧** ➜ {admin_mentions_tag}\n\n"
+                                                + f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
+                                            )
+                                            safe_send_message(thread_id, warn_card)
                                         continue
 
-                                if command_prefix_present and command_lower == "!rules":
-                                    rules_card = (
-                                        f"⚜🌷 𝗚𝗖 𝗥𝗨𝗟𝗘𝗦 • 𝗣𝗟𝗘𝗔𝗦𝗘 𝗥𝗘𝗔𝗗 🌷⚜️\n\n"
-                                        f"🤝 𝗥𝗘𝗦𝗣𝗘𝗖𝗧 𝗘𝗩𝗘𝗥𝗬𝗢𝗡𝗘\n"
-                                        f"💌 𝗞𝗘𝗘𝗣 𝗧𝗛𝗘 𝗩𝗜𝗕𝗘 𝗙𝗥𝗜𝗘𝗡𝗗𝗟𝗬\n\n"
-                                        f"🚫 𝗡𝗢 𝗔𝗕𝗨𝗦𝗘 • 𝗡𝗢 𝗧𝗢𝗫𝗜𝗖𝗜𝗧𝗬\n"
-                                        f"⚠️ 𝗗𝗥𝗔𝗠𝗔 & 𝗙𝗜𝗚𝗛𝗧𝗦 𝗔𝗥𝗘 𝗡𝗢𝗧 𝗔𝗟𝗟𝗢𝗪𝗘𝗗\n\n"
-                                        f"🔞 𝗡𝗢 𝗡𝗦𝗙𝗪 / 𝗔𝗗𝗨𝗟𝗧 𝗖𝗢𝗡𝗧𝗘𝗡𝗧\n"
-                                        f"🛡️ 𝗞𝗘𝗘𝗣 𝗧𝗛𝗘 𝗚𝗖 𝗖𝗟𝗘𝗔𝗡\n\n"
-                                        f"📢 𝗡𝗢 𝗦𝗣𝗔𝗠 • 𝗡𝗢 𝗙𝗟𝗢𝗢𝗗𝗜𝗡𝗚\n"
-                                        f"🚫 𝗗𝗢𝗡'𝗧 𝗦𝗘𝗡𝗗 𝗥𝗘𝗣𝗘𝗔𝗧𝗘𝗗 𝗠𝗘𝗦𝗦𝗔𝗚𝗘𝗦\n\n"
-                                        f"🔗 𝗡𝗢 𝗨𝗡𝗔𝗨𝗧𝗛𝗢𝗥𝗜𝗭𝗘𝗗 𝗟𝗜𝗡𝗞𝗦\n"
-                                        f"📩 𝗔𝗦𝗞 𝗔𝗗𝗠𝗜𝗡𝗦 𝗙𝗜𝗥𝗦𝗧\n\n"
-                                        f"👑 𝗥𝗘𝗦𝗣𝗘𝗖𝗧 𝗔𝗗𝗠𝗜𝗡𝗦 & 𝗠𝗢𝗗𝗘𝗥𝗔𝗧𝗢𝗥𝗦\n"
-                                        f"✨ 𝗙𝗢𝗟𝗟𝗢𝗪 𝗢𝗙𝗙𝗜𝗖𝗜𝗔𝗟 𝗜𝗡𝗦𝗧𝗥𝗨𝗖𝗧𝗜𝗢𝗡𝗦\n\n"
-                                        f"⚠️ 𝗥𝗨𝗟𝗘𝗦 𝗕𝗥𝗘𝗔𝗞 = 𝗪𝗔𝗥𝗡𝗜𝗡𝗚\n"
-                                        f"🚫 𝗥𝗘𝗣𝗘𝗔𝗧𝗘𝗗 𝗩𝗜𝗢𝗟𝗔𝗧𝗜𝗢𝗡𝗦 = 𝗥𝗘𝗠𝗢𝗩𝗔𝗟\n\n"
-                                        f"🌷 𝗦𝗧𝗔𝗬 𝗔𝗖𝗧𝗜𝗩𝗘 • 𝗦𝗧𝗔𝗬 𝗥𝗘𝗦𝗣𝗘𝗖𝗧𝗙𝗨𝗟 🌷\n"
-                                        f"💫 𝗘𝗡𝗝𝗢𝗬 • 𝗖𝗛𝗔𝗧 • 𝗚𝗥𝗢𝗪 • 𝗖𝗢𝗡𝗡𝗘𝗖𝗧 💫\n\n"
-                                        f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
-                                    )
-                                    safe_send_message(thread_id, rules_card)
-                                    continue
+                                    if LOCAL_AUTO_REPLIES and not command_prefix_present:
+                                        answer = None
+                                        if any(k in text_lower for k in ["bot help", "bot kya", "commands", "command list", "help me", "how to use bot"]):
+                                            answer = ("🔐 𝗦𝗠𝗪 𝗕𝗢𝗧 𝗦𝗨𝗣𝗣𝗢𝗥𝗧\n\n"
+                                                      "𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗟𝗜𝗦𝗧𝗦 𝗔𝗥𝗘 𝗣𝗥𝗜𝗩𝗔𝗧𝗘. 𝗣𝗟𝗘𝗔𝗦𝗘 𝗖𝗢𝗡𝗧𝗔𝗖𝗧 𝗦𝗠𝗪 (𝗦𝗧𝗔𝗬 𝗡𝗜𝗡𝗘) 𝗙𝗢𝗥 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗔𝗖𝗖𝗘𝗦𝗦.\n\n"
+                                                      "𝗠𝗔𝗡𝗨𝗔𝗟 𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦 𝗥𝗘𝗤𝗨𝗜𝗥𝗘: 𝗦𝗠𝗪🚩 !𝗰𝗼𝗺𝗺𝗮𝗻𝗱")
+                                        elif "good morning" in text_lower or re.search(r"(?<!\w)gm(?!\w)", text_lower):
+                                            answer = f"Good morning, {fix_mention(sender_username)}! Please follow the group rules and enjoy. 🌞"
+                                        elif "good night" in text_lower or re.search(r"(?<!\w)gn(?!\w)", text_lower):
+                                            answer = f"Good night, {fix_mention(sender_username)}! 🌙"
+                                        elif any(k in text_lower for k in ["thank you", "thanks"]):
+                                            answer = "You're welcome! 😊"
+                                        if answer:
+                                            safe_send_message(thread_id, answer)
+                                            continue
 
-                                abuse_reason = detect_abuse_reason(text)
-                                detection_text = get_message_detection_text(last_msg, text)
-                                link_type = detect_link_type(detection_text)
-                                link_violation = bool(link_type)
-                                if abuse_reason or link_violation:
-                                    warns, trust = ModerationEngine.add_warning(sender_username)
-                                    reason = abuse_reason or f"Unauthorized {link_type}"
-                                    detected_link_match = re.search(
-                                        r"(?i)(?<![\w@])(?:https?://|ftp://|www\.)[^\s<>\"']+|"
-                                        r"(?<![\w@])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{1,5})?(?:[/\?#][^\s<>\"']*)?|"
-                                        r"(?<![\w@])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:[/\?#][^\s<>\"']*)?",
-                                        detection_text, re.IGNORECASE)
-                                    detected_link = detected_link_match.group(0)[:180] if detected_link_match else "Link detected in message"
-                                    ModerationEngine.log_event(thread_id, sender_username, "WARNING", reason)
+                                    command_token = command_lower.split(maxsplit=1)[0] if command_lower else ""
+                                    # User-created text-only commands are public replies; command creation/deletion stays developer-only.
+                                    if command_prefix_present and command_token.startswith("!") and command_token != "!rules":
+                                        custom_commands = load_custom_commands()
+                                        custom_name = command_token[1:].casefold()
+                                        if custom_name in custom_commands and custom_name not in {"addcmd", "editcmd", "delcmd", "cmds"}:
+                                            safe_send_message(thread_id, custom_commands[custom_name])
+                                            continue
 
-                                    if warns >= 2 and not (is_dev or is_sender_admin):
-                                        execute_kick(thread_id, sender_id, sender_username, f"Second Violation ({reason})")
-                                    elif warns >= 2:
-                                        safe_send_message(thread_id, f"🚨 Repeat abuse alert for {fix_mention(sender_username)}. Admin review required; no automatic removal for privileged accounts.")
-                                    else:
-                                        warn_heading = (
-                                            "⚠️ **𝗔𝗕𝗨𝗦𝗜𝗡𝗚 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!** ⚠️\n\n" if abuse_reason else
-                                            ("🎬🔗 **𝗜𝗡𝗦𝗧𝗔𝗚𝗥𝗔𝗠 𝗥𝗘𝗘𝗟 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!** 🔗🎬\n\n" if link_type == "Instagram Reel Link" else "⚠️🚨 **𝗚𝗖 𝗦𝗔𝗙𝗘𝗧𝗬 𝗔𝗟𝗘𝗥𝗧!** 🚨⚠️\n\n")
-                                        )
-                                        warn_card = (
-                                            warn_heading
-                                            + f"👤 𝗢𝗙𝗙𝗘𝗡𝗗𝗘𝗥 ➜ {fix_mention(sender_username)}\n"
-                                            + f"🆔 𝗨𝗦𝗘𝗥 𝗜𝗗 ➜ {sender_id or 'Unavailable'}\n"
-                                            + (f"🔗 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗 𝗟𝗜𝗡𝗞 ➜ {detected_link}\n" if link_violation else "")
-                                            + f"🚫 𝗥𝗘𝗔𝗦𝗢𝗡   ➜ {reason}\n"
-                                            + f"⚠️ 𝗪𝗔𝗥𝗡𝗜𝗡𝗚𝗦 ➜ {warns}/2\n"
-                                            + f"📉 𝗧𝗥𝗨𝗦𝗧 𝗦𝗖𝗢𝗥𝗘 ➜ {trust}%\n\n"
-                                            + f"📢 **𝗔𝗗𝗠𝗜𝗡 𝗔𝗟𝗘𝗥𝗧** ➜ {admin_mentions_tag}\n\n"
-                                            + f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
-                                        )
-                                        safe_send_message(thread_id, warn_card)
-                                    continue
+                                    is_trying_command = command_prefix_present and command_token.startswith("!") and command_token != "!rules"
 
-                                if LOCAL_AUTO_REPLIES and not command_prefix_present:
-                                    answer = None
-                                    if any(k in text_lower for k in ["bot help", "bot kya", "commands", "command list", "help me", "how to use bot"]):
-                                        answer = ("🔐 𝗦𝗠𝗪 𝗕𝗢𝗧 𝗦𝗨𝗣𝗣𝗢𝗥𝗧\n\n"
-                                                  "𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗟𝗜𝗦𝗧𝗦 𝗔𝗥𝗘 𝗣𝗥𝗜𝗩𝗔𝗧𝗘. 𝗣𝗟𝗘𝗔𝗦𝗘 𝗖𝗢𝗡𝗧𝗔𝗖𝗧 𝗦𝗠𝗪 (𝗦𝗧𝗔𝗬 𝗡𝗜𝗡𝗘) 𝗙𝗢𝗥 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗔𝗖𝗖𝗘𝗦𝗦.\n\n"
-                                                  "𝗠𝗔𝗡𝗨𝗔𝗟 𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦 𝗥𝗘𝗤𝗨𝗜𝗥𝗘: 𝗦𝗠𝗪🚩 !𝗰𝗼𝗺𝗺𝗮𝗻𝗱")
-                                    elif "good morning" in text_lower or re.search(r"(?<!\w)gm(?!\w)", text_lower):
-                                        answer = f"Good morning, {fix_mention(sender_username)}! Please follow the group rules and enjoy. 🌞"
-                                    elif "good night" in text_lower or re.search(r"(?<!\w)gn(?!\w)", text_lower):
-                                        answer = f"Good night, {fix_mention(sender_username)}! 🌙"
-                                    elif any(k in text_lower for k in ["thank you", "thanks"]):
-                                        answer = "You're welcome! 😊"
-                                    if answer:
-                                        safe_send_message(thread_id, answer)
+                                    if is_trying_command and not is_dev:
                                         continue
 
-                                command_token = command_lower.split(maxsplit=1)[0] if command_lower else ""
-                                # User-created text-only commands are public replies; command creation/deletion stays developer-only.
-                                if command_prefix_present and command_token.startswith("!") and command_token != "!rules":
-                                    custom_commands = load_custom_commands()
-                                    custom_name = command_token[1:].casefold()
-                                    if custom_name in custom_commands and custom_name not in {"addcmd", "editcmd", "delcmd", "cmds"}:
-                                        safe_send_message(thread_id, custom_commands[custom_name])
-                                        continue
-
-                                is_trying_command = command_prefix_present and command_token.startswith("!") and command_token != "!rules"
-
-                                if is_trying_command and not is_dev:
-                                    continue
-
-                                if is_dev and command_prefix_present and command_lower.startswith("!"):
-                                    if command_token in {"!gc", "!gcanalytics"}:
-                                        db = SessionLocal()
-                                        try:
-                                            safe_send_message(thread_id, group_report(db, thread_id, str(gc_name)))
-                                        finally:
-                                            db.close()
-                                        continue
-                                    elif command_token == "!gcs":
-                                        db = SessionLocal()
-                                        try:
-                                            rows = db.query(GroupAnalytics).order_by(GroupAnalytics.last_activity.desc()).limit(30).all()
-                                            lines = [f"• {r.group_name} | ID: {r.group_id} | Members: {r.observed_members or 0} | Msgs: {r.message_count or 0}" for r in rows]
-                                            safe_send_message(thread_id, "📚 TRACKED GROUPS\n\n" + ("\n".join(lines) if lines else "No GC records yet."))
-                                        finally:
-                                            db.close()
-                                        continue
-                                    elif command_token == "!gcuser":
-                                        parts = command_text.split(maxsplit=1)
-                                        target = parts[1].lstrip("@") if len(parts) > 1 else ""
-                                        db = SessionLocal()
-                                        try:
-                                            q = db.query(GroupMemberAnalytics).filter_by(group_id=str(thread_id))
-                                            if target:
-                                                q = q.filter(func.lower(GroupMemberAnalytics.username) == target.lower())
-                                            rows = q.order_by(GroupMemberAnalytics.message_count.desc()).limit(20).all()
-                                            lines = [f"@{r.username} | UID: {r.user_id} | Msgs: {r.message_count}" for r in rows]
-                                            safe_send_message(thread_id, "👥 GC MEMBER ACTIVITY\n\n" + ("\n".join(lines) if lines else "No matching member activity recorded."))
-                                        finally:
-                                            db.close()
-                                        continue
-                                    if command_lower == "!analytics":
-                                        db = SessionLocal()
-                                        try:
-                                            total_users = db.query(UserProfile).count()
-                                            total_msgs = db.query(UserProfile).with_entities(UserProfile.total_messages).all()
-                                            total_warns = db.query(UserProfile).with_entities(UserProfile.warning_count).all()
-                                            event_count = db.query(SecurityLog).count()
-                                            safe_send_message(thread_id, f"📊 𝗦𝗠𝗪 𝗕𝗢𝗧 𝗜𝗡𝗙𝗢𝗥𝗠𝗔𝗧𝗜𝗢𝗡\n\n𝗦𝗧𝗔𝗧𝗨𝗦 ➜ 𝗢𝗡𝗟𝗜𝗡𝗘 & 𝗔𝗖𝗧𝗜𝗩𝗘\n🤖 𝗕𝗢𝗧 ➜ 𝗦𝗠𝗪\n👥 𝗧𝗥𝗔𝗖𝗞𝗘𝗗 𝗨𝗦𝗘𝗥𝗦 ➜ {total_users}\n💬 𝗧𝗥𝗔𝗖𝗞𝗘𝗗 𝗠𝗘𝗦𝗦𝗔𝗚𝗘𝗦 ➜ {sum((x[0] or 0) for x in total_msgs)}\n⚠️ 𝗪𝗔𝗥𝗡𝗜𝗡𝗚𝗦 ➜ {sum((x[0] or 0) for x in total_warns)}\n📋 𝗔𝗨𝗗𝗜𝗧 𝗘𝗩𝗘𝗡𝗧𝗦 ➜ {event_count}\n📨 𝗠𝗘𝗦𝗦𝗔𝗚𝗘𝗦 𝗧𝗛𝗜𝗦 𝗥𝗨𝗡 ➜ {TOTAL_SEEN_MESSAGES}\n\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
-                                        finally:
-                                            db.close()
-                                        continue
-                                    elif command_lower == "!session":
-                                        safe_send_message(thread_id, f"🔐 Session health\nSession ID configured: {'YES' if INSTAGRAM_SESSION_ID and INSTAGRAM_SESSION_ID not in {'PASTE_YOUR_SESSION_ID_HERE', 'PASTE_YOUR_NEW_SESSION_ID_HERE', 'YOUR_SESSION_ID_HERE'} else 'NO'}\nLast successful poll: {LAST_SUCCESSFUL_POLL or 'not yet'}\nLast error type: {LAST_POLL_ERROR}")
-                                        continue
-                                    elif command_token == "!safe_mode":
-                                        safe_parts = command_text.split(maxsplit=2)
-                                        safe_action = safe_parts[1].casefold() if len(safe_parts) > 1 else "toggle"
-                                        if safe_action in {"clear", "remove", "reset"}:
-                                            target = safe_parts[2].strip().split()[0].lstrip("@") if len(safe_parts) > 2 else ""
+                                    if is_dev and command_prefix_present and command_lower.startswith("!"):
+                                        if command_token in {"!gc", "!gcanalytics"}:
+                                            db = SessionLocal()
+                                            try:
+                                                safe_send_message(thread_id, group_report(db, thread_id, str(gc_name)))
+                                            finally:
+                                                db.close()
+                                            continue
+                                        elif command_token == "!gcs":
+                                            db = SessionLocal()
+                                            try:
+                                                rows = db.query(GroupAnalytics).order_by(GroupAnalytics.last_activity.desc()).limit(30).all()
+                                                lines = [f"• {r.group_name} | ID: {r.group_id} | Members: {r.observed_members or 0} | Msgs: {r.message_count or 0}" for r in rows]
+                                                safe_send_message(thread_id, "📚 TRACKED GROUPS\n\n" + ("\n".join(lines) if lines else "No GC records yet."))
+                                            finally:
+                                                db.close()
+                                            continue
+                                        elif command_token == "!gcuser":
+                                            parts = command_text.split(maxsplit=1)
+                                            target = parts[1].lstrip("@") if len(parts) > 1 else ""
+                                            db = SessionLocal()
+                                            try:
+                                                q = db.query(GroupMemberAnalytics).filter_by(group_id=str(thread_id))
+                                                if target:
+                                                    q = q.filter(func.lower(GroupMemberAnalytics.username) == target.lower())
+                                                rows = q.order_by(GroupMemberAnalytics.message_count.desc()).limit(20).all()
+                                                lines = [f"@{r.username} | UID: {r.user_id} | Msgs: {r.message_count}" for r in rows]
+                                                safe_send_message(thread_id, "👥 GC MEMBER ACTIVITY\n\n" + ("\n".join(lines) if lines else "No matching member activity recorded."))
+                                            finally:
+                                                db.close()
+                                            continue
+                                        if command_lower == "!analytics":
+                                            db = SessionLocal()
+                                            try:
+                                                total_users = db.query(UserProfile).count()
+                                                total_msgs = db.query(UserProfile).with_entities(UserProfile.total_messages).all()
+                                                total_warns = db.query(UserProfile).with_entities(UserProfile.warning_count).all()
+                                                event_count = db.query(SecurityLog).count()
+                                                safe_send_message(thread_id, f"📊 𝗦𝗠𝗪 𝗕𝗢𝗧 𝗜𝗡𝗙𝗢𝗥𝗠𝗔𝗧𝗜𝗢𝗡\n\n𝗦𝗧𝗔𝗧𝗨𝗦 ➜ 𝗢𝗡𝗟𝗜𝗡𝗘 & 𝗔𝗖𝗧𝗜𝗩𝗘\n🤖 𝗕𝗢𝗧 ➜ 𝗦𝗠𝗪\n👥 𝗧𝗥𝗔𝗖𝗞𝗘𝗗 𝗨𝗦𝗘𝗥𝗦 ➜ {total_users}\n💬 𝗧𝗥𝗔𝗖𝗞𝗘𝗗 𝗠𝗘𝗦𝗦𝗔𝗚𝗘𝗦 ➜ {sum((x[0] or 0) for x in total_msgs)}\n⚠️ 𝗪𝗔𝗥𝗡𝗜𝗡𝗚𝗦 ➜ {sum((x[0] or 0) for x in total_warns)}\n📋 𝗔𝗨𝗗𝗜𝗧 𝗘𝗩𝗘𝗡𝗧𝗦 ➜ {event_count}\n📨 𝗠𝗘𝗦𝗦𝗔𝗚𝗘𝗦 𝗧𝗛𝗜𝗦 𝗥𝗨𝗡 ➜ {TOTAL_SEEN_MESSAGES}\n\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
+                                            finally:
+                                                db.close()
+                                            continue
+                                        elif command_lower == "!session":
+                                            safe_send_message(thread_id, f"🔐 Session health\nSession ID configured: {'YES' if INSTAGRAM_SESSION_ID and INSTAGRAM_SESSION_ID not in {'PASTE_YOUR_SESSION_ID_HERE', 'PASTE_YOUR_NEW_SESSION_ID_HERE', 'YOUR_SESSION_ID_HERE'} else 'NO'}\nLast successful poll: {LAST_SUCCESSFUL_POLL or 'not yet'}\nLast error type: {LAST_POLL_ERROR}")
+                                            continue
+                                        elif command_token == "!safe_mode":
+                                            safe_parts = command_text.split(maxsplit=2)
+                                            safe_action = safe_parts[1].casefold() if len(safe_parts) > 1 else "toggle"
+                                            if safe_action in {"clear", "remove", "reset"}:
+                                                target = safe_parts[2].strip().split()[0].lstrip("@") if len(safe_parts) > 2 else ""
+                                                if not target:
+                                                    safe_send_message(thread_id, "🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 𝗨𝗦𝗘𝗥 𝗖𝗟𝗘𝗔𝗥\n\nUsage: 𝗦𝗠𝗪🚩 !safe_mode clear @username")
+                                                    continue
+                                                target_key = target.casefold()
+                                                TARGETED_USERS.discard(target_key)
+                                                SHADOWBANNED_USERS.discard(target_key)
+                                                save_runtime_state()
+                                                try:
+                                                    target_uid = str(cl.user_id_from_username(target))
+                                                    user_message_windows.pop(target_uid, None)
+                                                    duplicate_message_windows.pop(target_uid, None)
+                                                    USER_LAST_MESSAGE_TIME.pop(target_uid, None)
+                                                except Exception:
+                                                    target_uid = "not resolved"
+                                                db = SessionLocal()
+                                                try:
+                                                    profile = db.query(UserProfile).filter(func.lower(UserProfile.username) == target_key).first()
+                                                    if profile:
+                                                        profile.warning_count = 0
+                                                        profile.trust_score = 100.0
+                                                        db.commit()
+                                                except Exception:
+                                                    db.rollback()
+                                                    logging.exception("safe_mode_user_clear_failed username=%s", target_key)
+                                                finally:
+                                                    db.close()
+                                                ModerationEngine.log_event(thread_id, target_key, "SAFE_MODE_USER_CLEARED", f"Developer cleared user tracking; user_id={target_uid}")
+                                                safe_send_message(thread_id, f"🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 𝗨𝗦𝗘𝗥 𝗖𝗟𝗘𝗔𝗥𝗘𝗗\n\n👤 𝗨𝗦𝗘𝗥 ➜ @{target_key}\n✅ Restrictions and warning state cleared where resolvable.\n🛡️ 𝗚𝗟𝗢𝗕𝗔𝗟 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ {'ON' if SAFE_MODE else 'OFF'} (unchanged)\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
+                                            else:
+                                                SAFE_MODE = not SAFE_MODE
+                                                safe_send_message(thread_id, f"🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ {'ON' if SAFE_MODE else 'OFF'}\nUse 𝗦𝗠𝗪🚩 !safe_mode clear @username to clear one user's bot-managed restrictions without changing global Safe Mode.")
+                                            continue
+                                        elif command_token == "!safeclear":
+                                            # Alias for clearing one user's bot-managed Safe Mode/restriction state.
+                                            safe_parts = command_text.split(maxsplit=1)
+                                            target = safe_parts[1].strip().split()[0].lstrip("@") if len(safe_parts) > 1 else ""
                                             if not target:
-                                                safe_send_message(thread_id, "🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 𝗨𝗦𝗘𝗥 𝗖𝗟𝗘𝗔𝗥\n\nUsage: 𝗦𝗠𝗪🚩 !safe_mode clear @username")
+                                                safe_send_message(thread_id, "Usage: 𝗦𝗠𝗪🚩 !safeclear @username")
                                                 continue
-                                            target_key = target.casefold()
-                                            TARGETED_USERS.discard(target_key)
-                                            SHADOWBANNED_USERS.discard(target_key)
+                                            TARGETED_USERS.discard(target.casefold())
+                                            SHADOWBANNED_USERS.discard(target.casefold())
                                             save_runtime_state()
                                             try:
                                                 target_uid = str(cl.user_id_from_username(target))
@@ -1270,6 +1322,216 @@ def start_bot():
                                                 USER_LAST_MESSAGE_TIME.pop(target_uid, None)
                                             except Exception:
                                                 target_uid = "not resolved"
+                                            ModerationEngine.log_event(thread_id, target.casefold(), "SAFE_MODE_USER_CLEARED", f"Developer cleared user tracking; user_id={target_uid}")
+                                            safe_send_message(thread_id, f"🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 𝗨𝗦𝗘𝗥 𝗖𝗟𝗘𝗔𝗥𝗘𝗗\n👤 𝗨𝗦𝗘𝗥 ➜ @{target.casefold()}\n🛡️ 𝗚𝗟𝗢𝗕𝗔𝗟 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ {'ON' if SAFE_MODE else 'OFF'} (unchanged)\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
+                                            continue
+                                        elif command_lower in {"!panel", "!status"}:
+                                            uptime = int(time.time() - STARTED_AT)
+                                            db = SessionLocal()
+                                            try:
+                                                profiles = db.query(UserProfile).count()
+                                                warnings = db.query(UserProfile).with_entities(UserProfile.warning_count).all()
+                                                warning_total = sum((x[0] or 0) for x in warnings)
+                                                log_total = db.query(SecurityLog).count()
+                                            finally:
+                                                db.close()
+                                            safe_send_message(thread_id, f"🧠 SMART BOT PANEL\nMode: {'LOCKDOWN' if LOCKDOWN_MODE else 'NORMAL'}\nUptime: {uptime}s\nMembers tracked: {profiles}\nWarnings recorded: {warning_total}\nAudit events: {log_total}\nMessages seen this run: {TOTAL_SEEN_MESSAGES}\nLast poll: {LAST_SUCCESSFUL_POLL or 'pending'}\nLast poll error: {LAST_POLL_ERROR}")
+                                            continue
+                                        elif command_lower == "!logs":
+                                            db = SessionLocal()
+                                            try:
+                                                rows = db.query(SecurityLog).order_by(SecurityLog.id.desc()).limit(5).all()
+                                                report = "\n".join(f"#{r.id} {r.event_type} @{r.username}: {(r.details or '')[:100]}" for r in rows) or "No audit events yet."
+                                            finally:
+                                                db.close()
+                                            safe_send_message(thread_id, "📋 Recent audit logs\n" + report[:1500])
+                                            continue
+                                        elif command_lower == "!backup":
+                                            try:
+                                                if DATABASE_URL.startswith("sqlite:///"):
+                                                    db_path = DATABASE_URL.replace("sqlite:///", "", 1)
+                                                    if db_path == ":memory:":
+                                                        raise RuntimeError("In-memory database cannot be backed up")
+                                                    src = sqlite3.connect(db_path)
+                                                    dst_path = f"{Path(db_path).stem}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+                                                    dst = sqlite3.connect(dst_path)
+                                                    with dst:
+                                                        src.backup(dst)
+                                                    dst.close(); src.close()
+                                                    safe_send_message(thread_id, f"✅ Database backup created on bot host: {dst_path}.")
+                                                else:
+                                                    safe_send_message(thread_id, "Backup requires a SQLite DATABASE_URL.")
+                                            except Exception as backup_error:
+                                                logging.exception("backup_failed")
+                                                safe_send_message(thread_id, f"Backup failed: {type(backup_error).__name__}")
+                                            continue
+                                        elif command_lower == "!help":
+                                            # Never publish the private command catalogue in a group chat.
+                                            # Authorized developers can request the full command guide privately from SMW.
+                                            safe_send_message(
+                                                thread_id,
+                                                "🔐 𝗣𝗥𝗜𝗩𝗔𝗧𝗘 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 𝗦𝗨𝗣𝗣𝗢𝗥𝗧\n\n"
+                                                "𝗧𝗛𝗘 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗟𝗜𝗦𝗧 𝗜𝗦 𝗣𝗥𝗜𝗩𝗔𝗧𝗘 𝗔𝗡𝗗 𝗪𝗜𝗟𝗟 𝗡𝗢𝗧 𝗕𝗘 𝗦𝗛𝗢𝗪𝗡 𝗜𝗡 𝗧𝗛𝗜𝗦 𝗚𝗥𝗢𝗨𝗣.\n\n"
+                                                "𝗙𝗢𝗥 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗔𝗖𝗖𝗘𝗦𝗦 𝗢𝗥 𝗦𝗨𝗣𝗣𝗢𝗥𝗧, 𝗖𝗢𝗡𝗧𝗔𝗖𝗧 𝗦𝗠𝗪 (𝗦𝗧𝗔𝗬 𝗡𝗜𝗡𝗘).\n\n"
+                                                "𝗠𝗔𝗡𝗨𝗔𝗟 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗙𝗢𝗥𝗠𝗔𝗧: 𝗦𝗠𝗪🚩 !𝗰𝗼𝗺𝗺𝗮𝗻𝗱\n"
+                                                "𝗔𝗨𝗧𝗢𝗠𝗔𝗧𝗜𝗖 𝗦𝗘𝗖𝗨𝗥𝗜𝗧𝗬 𝗙𝗘𝗔𝗧𝗨𝗥𝗘𝗦 𝗥𝗨𝗡 𝗢𝗡 𝗧𝗛𝗘𝗜𝗥 𝗢𝗪𝗡."
+                                            )
+                                            continue
+                                        elif command_token in {"!addcmd", "!editcmd"}:
+                                            parts = command_text.split(maxsplit=2)
+                                            if len(parts) < 3 or "|" not in parts[2]:
+                                                safe_send_message(thread_id, "Usage: 𝗦𝗠𝗪🚩 !addcmd command | reply text\nExample: 𝗦𝗠𝗪🚩 !addcmd support | Contact the GC admins.")
+                                            else:
+                                                cmd_name = parts[1].strip().lstrip("!").casefold()
+                                                reply_text = parts[2].split("|", 1)[1].strip()
+                                                if not re.fullmatch(r"[a-z0-9_]{2,32}", cmd_name) or cmd_name in {"help", "panel", "status", "analytics", "rules", "addcmd", "editcmd", "delcmd", "cmds", "clearuser", "resetuser", "unrestrict", "gc", "gcanalytics", "gcs", "gcuser", "session", "safe_mode", "logs", "backup", "lockdown", "unlock", "godmode", "target", "shadowban", "nuke", "resetwarn", "unwarn", "antispam", "report", "inactive", "tagall", "active", "members", "admins", "dp", "profile", "user", "stats", "botinfo"}:
+                                                    safe_send_message(thread_id, "❌ Invalid or reserved command name. Use 2-32 letters, digits, or underscores.")
+                                                elif not reply_text:
+                                                    safe_send_message(thread_id, "❌ Reply text cannot be empty.")
+                                                else:
+                                                    custom_commands = load_custom_commands()
+                                                    existed = cmd_name in custom_commands
+                                                    custom_commands[cmd_name] = reply_text[:1200]
+                                                    save_custom_commands(custom_commands)
+                                                    safe_send_message(thread_id, f"✅ Custom command {'updated' if existed else 'created'}: !{cmd_name}\nMembers can use: 𝗦𝗠𝗪🚩 !{cmd_name}")
+                                            continue
+                                        elif command_token == "!delcmd":
+                                            parts = command_text.split(maxsplit=1)
+                                            cmd_name = parts[1].strip().lstrip("!").casefold() if len(parts) > 1 else ""
+                                            custom_commands = load_custom_commands()
+                                            if cmd_name in custom_commands:
+                                                del custom_commands[cmd_name]
+                                                save_custom_commands(custom_commands)
+                                                safe_send_message(thread_id, f"✅ Custom command deleted: !{cmd_name}")
+                                            else:
+                                                safe_send_message(thread_id, f"ℹ️ Custom command not found: !{cmd_name or '(missing name)'}")
+                                            continue
+                                        elif command_token == "!cmds":
+                                            custom_commands = load_custom_commands()
+                                            listing = "\n".join(f"• 𝗦𝗠𝗪🚩 !{name}" for name in sorted(custom_commands)) or "No custom commands created yet."
+                                            safe_send_message(thread_id, "🧩 CUSTOM COMMANDS\n\n" + listing[:1400])
+                                            continue
+                                        elif command_lower == "!lockdown":
+                                            LOCKDOWN_MODE = True
+                                            save_runtime_state()
+                                            safe_send_message(thread_id, "🔒 𝗟𝗢𝗖𝗞𝗗𝗢𝗪𝗡 𝗔𝗖𝗧𝗜𝗩𝗘\n\n🛡️ Non-admin members will be removed on new messages.")
+                                            continue
+                                        elif command_lower == "!unlock":
+                                            LOCKDOWN_MODE = False
+                                            save_runtime_state()
+                                            safe_send_message(thread_id, "🔓 𝗟𝗢𝗖𝗞𝗗𝗢𝗪𝗡 𝗗𝗜𝗦𝗔𝗕𝗟𝗘𝗗\n\n🟢 Normal group activity restored.")
+                                            continue
+                                        elif command_lower == "!godmode":
+                                            status_card = (
+                                                f"⚡🛡️ **𝗚𝗢𝗗𝗠𝗢𝗗𝗘 𝗦𝗧𝗔𝗧𝗨𝗦** 🛡️⚡\n\n"
+                                                f"🔒 **𝗟𝗼𝗰𝗸𝗱𝗼𝘄𝗻** ➜ {'ON 🚨' if LOCKDOWN_MODE else 'OFF 🟢'}\n"
+                                                f"🎯 **𝗧𝗮𝗿𝗴𝗲𝘁𝘀** ➜ {len(TARGETED_USERS)} Users\n"
+                                                f"🛡️ **Anti-Spam** ➜ {'ON' if ANTISPAM_ENABLED else 'OFF'} (limit {ANTISPAM_LIMIT})\n"
+                                                f"👻 **𝗦𝗵𝗮𝗱𝗼𝘄𝗯𝗮𝗻𝘀** ➜ {len(SHADOWBANNED_USERS)} Users\n\n"
+                                                f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}\n"
+                                            )
+                                            safe_send_message(thread_id, status_card)
+                                            continue
+                                        elif command_lower.startswith("!target"):
+                                            parts = command_text.split()
+                                            action = parts[1].lower() if len(parts) > 1 else "help"
+                                            if action in {"remove", "del", "delete", "off"} and len(parts) > 2:
+                                                target = parts[2].lstrip("@").casefold()
+                                                if target in TARGETED_USERS:
+                                                    TARGETED_USERS.discard(target)
+                                                    save_runtime_state()
+                                                    safe_send_message(thread_id, f"✅ Target removed: @{target}")
+                                                else:
+                                                    safe_send_message(thread_id, f"ℹ @{target} target list mein nahi hai.")
+                                            elif action in {"clear", "reset", "all"}:
+                                                TARGETED_USERS.clear()
+                                                save_runtime_state()
+                                                safe_send_message(thread_id, "✅ Saare target rules clear kar diye gaye.")
+                                            elif action in {"list", "show"}:
+                                                targets = ", ".join(f"@{name}" for name in sorted(TARGETED_USERS)) or "None"
+                                                safe_send_message(thread_id, f"🎯 Active targets: {targets}")
+                                            elif len(parts) > 1:
+                                                target = parts[1].lstrip("@").casefold()
+                                                TARGETED_USERS.add(target)
+                                                save_runtime_state()
+                                                safe_send_message(thread_id, f"🎯 Target registered: @{target}")
+                                            else:
+                                                safe_send_message(thread_id, "Usage: !target @username | !target remove @username | !target clear | !target list")
+                                            continue
+                                        elif command_lower.startswith("!shadowban"):
+                                            parts = command_text.split()
+                                            action = parts[1].lower() if len(parts) > 1 else "help"
+                                            if action in {"remove", "del", "delete", "off"} and len(parts) > 2:
+                                                target = parts[2].lstrip("@").casefold()
+                                                SHADOWBANNED_USERS.discard(target)
+                                                save_runtime_state()
+                                                safe_send_message(thread_id, f"✅ Shadowban removed for @{target}")
+                                            elif action in {"clear", "reset", "all"}:
+                                                SHADOWBANNED_USERS.clear(); save_runtime_state()
+                                                safe_send_message(thread_id, "✅ All shadowban entries cleared.")
+                                            elif action in {"list", "show"}:
+                                                safe_send_message(thread_id, "👻 Shadowbanned: " + (", ".join("@"+x for x in sorted(SHADOWBANNED_USERS)) or "None"))
+                                            elif len(parts) > 1:
+                                                target = parts[1].lstrip("@").casefold()
+                                                SHADOWBANNED_USERS.add(target); save_runtime_state()
+                                                safe_send_message(thread_id, f"👻 Shadowban rule registered: @{target}")
+                                            else:
+                                                safe_send_message(thread_id, "Usage: !shadowban @user | remove @user | clear | list")
+                                            continue
+                                        elif command_lower.startswith("!nuke"):
+                                            parts = command_text.split()
+                                            if len(parts) > 1:
+                                                target = parts[1].lstrip("@")
+                                                try:
+                                                    u_id = cl.user_id_from_username(target)
+                                                    execute_kick(thread_id, u_id, target, "NUKE BAN")
+                                                except Exception as e:
+                                                    safe_send_message(thread_id, f"❌ Could not remove @{target}: {e}")
+                                            else:
+                                                safe_send_message(thread_id, "Usage: !nuke @username")
+                                            continue
+                                        elif command_token == "!kick":
+                                            # Hidden developer-only manual removal. Safe Mode blocks automatic removals,
+                                            # but never blocks an explicit, authorized developer decision.
+                                            parts = command_text.split(maxsplit=1)
+                                            target = parts[1].strip().split()[0].lstrip("@") if len(parts) > 1 else ""
+                                            if not target:
+                                                safe_send_message(thread_id, "Usage: 𝗦𝗠𝗪🚩 !kick @username")
+                                                continue
+                                            target_user = next((u for u in users if str(getattr(u, "username", "") or "").casefold() == target.casefold()), None)
+                                            target_uid = str(getattr(target_user, "pk", "") or "") if target_user else ""
+                                            canonical_username = str(getattr(target_user, "username", "") or target).lstrip("@")
+                                            if not target_uid:
+                                                try:
+                                                    target_uid = str(cl.user_id_from_username(canonical_username))
+                                                except Exception:
+                                                    target_uid = ""
+                                            if not target_uid:
+                                                safe_send_message(thread_id, f"❌ USER NOT FOUND\nUsername: @{canonical_username}\nThe account could not be resolved. Check the exact Instagram username.")
+                                                continue
+                                            try:
+                                                cl.user_remove_from_thread(thread_id, int(target_uid))
+                                                target_key = canonical_username.casefold()
+                                                TARGETED_USERS.discard(target_key)
+                                                SHADOWBANNED_USERS.discard(target_key)
+                                                save_runtime_state()
+                                                ModerationEngine.log_event(thread_id, target_key, "DEVELOPER_MANUAL_REMOVAL", f"Removed by authorized developer; user_id={target_uid}; Safe Mode={SAFE_MODE}")
+                                                safe_send_message(thread_id, f"🚪 MEMBER REMOVED\n👤 USERNAME ➜ @{canonical_username}\n🆔 USER ID ➜ {target_uid}\n🛡️ SAFE MODE ➜ {'ON (manual developer action allowed)' if SAFE_MODE else 'OFF'}\n👑 AUTHORIZED BY ➜ SMW🚩")
+                                            except Exception as removal_error:
+                                                logging.exception("developer_manual_removal_failed thread=%s uid=%s", thread_id, target_uid)
+                                                safe_send_message(thread_id, f"❌ REMOVAL FAILED\n👤 USERNAME ➜ @{canonical_username}\nReason: Instagram rejected the removal ({type(removal_error).__name__}). Check the bot account's group permissions and API support.")
+                                            continue
+                                        elif command_token in {"!clearuser", "!resetuser", "!unrestrict"}:
+                                            parts = command_text.split(maxsplit=1)
+                                            target = parts[1].strip().split()[0].lstrip("@") if len(parts) > 1 else ""
+                                            if not target:
+                                                safe_send_message(thread_id, "Usage: 𝗦𝗠𝗪🚩 !clearuser @username\nClears this bot's warnings and active restrictions for one user.")
+                                                continue
+                                            target_key = target.casefold()
+                                            # Remove all bot-managed username restrictions.
+                                            TARGETED_USERS.discard(target_key)
+                                            SHADOWBANNED_USERS.discard(target_key)
+                                            save_runtime_state()
                                             db = SessionLocal()
                                             try:
                                                 profile = db.query(UserProfile).filter(func.lower(UserProfile.username) == target_key).first()
@@ -1277,450 +1539,213 @@ def start_bot():
                                                     profile.warning_count = 0
                                                     profile.trust_score = 100.0
                                                     db.commit()
+                                                else:
+                                                    db.rollback()
                                             except Exception:
                                                 db.rollback()
-                                                logging.exception("safe_mode_user_clear_failed username=%s", target_key)
+                                                logging.exception("clearuser_profile_reset_failed username=%s", target_key)
                                             finally:
                                                 db.close()
-                                            ModerationEngine.log_event(thread_id, target_key, "SAFE_MODE_USER_CLEARED", f"Developer cleared user tracking; user_id={target_uid}")
-                                            safe_send_message(thread_id, f"🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 𝗨𝗦𝗘𝗥 𝗖𝗟𝗘𝗔𝗥𝗘𝗗\n\n👤 𝗨𝗦𝗘𝗥 ➜ @{target_key}\n✅ Restrictions and warning state cleared where resolvable.\n🛡️ 𝗚𝗟𝗢𝗕𝗔𝗟 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ {'ON' if SAFE_MODE else 'OFF'} (unchanged)\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
-                                        else:
-                                            SAFE_MODE = not SAFE_MODE
-                                            safe_send_message(thread_id, f"🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ {'ON' if SAFE_MODE else 'OFF'}\nUse 𝗦𝗠𝗪🚩 !safe_mode clear @username to clear one user's bot-managed restrictions without changing global Safe Mode.")
-                                        continue
-                                    elif command_token == "!safeclear":
-                                        # Alias for clearing one user's bot-managed Safe Mode/restriction state.
-                                        safe_parts = command_text.split(maxsplit=1)
-                                        target = safe_parts[1].strip().split()[0].lstrip("@") if len(safe_parts) > 1 else ""
-                                        if not target:
-                                            safe_send_message(thread_id, "Usage: 𝗦𝗠𝗪🚩 !safeclear @username")
-                                            continue
-                                        TARGETED_USERS.discard(target.casefold())
-                                        SHADOWBANNED_USERS.discard(target.casefold())
-                                        save_runtime_state()
-                                        try:
-                                            target_uid = str(cl.user_id_from_username(target))
-                                            user_message_windows.pop(target_uid, None)
-                                            duplicate_message_windows.pop(target_uid, None)
-                                            USER_LAST_MESSAGE_TIME.pop(target_uid, None)
-                                        except Exception:
-                                            target_uid = "not resolved"
-                                        ModerationEngine.log_event(thread_id, target.casefold(), "SAFE_MODE_USER_CLEARED", f"Developer cleared user tracking; user_id={target_uid}")
-                                        safe_send_message(thread_id, f"🛡️ 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 𝗨𝗦𝗘𝗥 𝗖𝗟𝗘𝗔𝗥𝗘𝗗\n👤 𝗨𝗦𝗘𝗥 ➜ @{target.casefold()}\n🛡️ 𝗚𝗟𝗢𝗕𝗔𝗟 𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 ➜ {'ON' if SAFE_MODE else 'OFF'} (unchanged)\n👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩")
-                                        continue
-                                    elif command_lower in {"!panel", "!status"}:
-                                        uptime = int(time.time() - STARTED_AT)
-                                        db = SessionLocal()
-                                        try:
-                                            profiles = db.query(UserProfile).count()
-                                            warnings = db.query(UserProfile).with_entities(UserProfile.warning_count).all()
-                                            warning_total = sum((x[0] or 0) for x in warnings)
-                                            log_total = db.query(SecurityLog).count()
-                                        finally:
-                                            db.close()
-                                        safe_send_message(thread_id, f"🧠 SMART BOT PANEL\nMode: {'LOCKDOWN' if LOCKDOWN_MODE else 'NORMAL'}\nUptime: {uptime}s\nMembers tracked: {profiles}\nWarnings recorded: {warning_total}\nAudit events: {log_total}\nMessages seen this run: {TOTAL_SEEN_MESSAGES}\nLast poll: {LAST_SUCCESSFUL_POLL or 'pending'}\nLast poll error: {LAST_POLL_ERROR}")
-                                        continue
-                                    elif command_lower == "!logs":
-                                        db = SessionLocal()
-                                        try:
-                                            rows = db.query(SecurityLog).order_by(SecurityLog.id.desc()).limit(5).all()
-                                            report = "\n".join(f"#{r.id} {r.event_type} @{r.username}: {(r.details or '')[:100]}" for r in rows) or "No audit events yet."
-                                        finally:
-                                            db.close()
-                                        safe_send_message(thread_id, "📋 Recent audit logs\n" + report[:1500])
-                                        continue
-                                    elif command_lower == "!backup":
-                                        try:
-                                            if DATABASE_URL.startswith("sqlite:///"):
-                                                db_path = DATABASE_URL.replace("sqlite:///", "", 1)
-                                                if db_path == ":memory:":
-                                                    raise RuntimeError("In-memory database cannot be backed up")
-                                                src = sqlite3.connect(db_path)
-                                                dst_path = f"{Path(db_path).stem}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-                                                dst = sqlite3.connect(dst_path)
-                                                with dst:
-                                                    src.backup(dst)
-                                                dst.close(); src.close()
-                                                safe_send_message(thread_id, f"✅ Database backup created on bot host: {dst_path}.")
-                                            else:
-                                                safe_send_message(thread_id, "Backup requires a SQLite DATABASE_URL.")
-                                        except Exception as backup_error:
-                                            logging.exception("backup_failed")
-                                            safe_send_message(thread_id, f"Backup failed: {type(backup_error).__name__}")
-                                        continue
-                                    elif command_lower == "!help":
-                                        # Never publish the private command catalogue in a group chat.
-                                        # Authorized developers can request the full command guide privately from SMW.
-                                        safe_send_message(
-                                            thread_id,
-                                            "🔐 𝗣𝗥𝗜𝗩𝗔𝗧𝗘 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 𝗦𝗨𝗣𝗣𝗢𝗥𝗧\n\n"
-                                            "𝗧𝗛𝗘 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗟𝗜𝗦𝗧 𝗜𝗦 𝗣𝗥𝗜𝗩𝗔𝗧𝗘 𝗔𝗡𝗗 𝗪𝗜𝗟𝗟 𝗡𝗢𝗧 𝗕𝗘 𝗦𝗛𝗢𝗪𝗡 𝗜𝗡 𝗧𝗛𝗜𝗦 𝗚𝗥𝗢𝗨𝗣.\n\n"
-                                            "𝗙𝗢𝗥 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗔𝗖𝗖𝗘𝗦𝗦 𝗢𝗥 𝗦𝗨𝗣𝗣𝗢𝗥𝗧, 𝗖𝗢𝗡𝗧𝗔𝗖𝗧 𝗦𝗠𝗪 (𝗦𝗧𝗔𝗬 𝗡𝗜𝗡𝗘).\n\n"
-                                            "𝗠𝗔𝗡𝗨𝗔𝗟 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗙𝗢𝗥𝗠𝗔𝗧: 𝗦𝗠𝗪🚩 !𝗰𝗼𝗺𝗺𝗮𝗻𝗱\n"
-                                            "𝗔𝗨𝗧𝗢𝗠𝗔𝗧𝗜𝗖 𝗦𝗘𝗖𝗨𝗥𝗜𝗧𝗬 𝗙𝗘𝗔𝗧𝗨𝗥𝗘𝗦 𝗥𝗨𝗡 𝗢𝗡 𝗧𝗛𝗘𝗜𝗥 𝗢𝗪𝗡."
-                                        )
-                                        continue
-                                    elif command_token in {"!addcmd", "!editcmd"}:
-                                        parts = command_text.split(maxsplit=2)
-                                        if len(parts) < 3 or "|" not in parts[2]:
-                                            safe_send_message(thread_id, "Usage: 𝗦𝗠𝗪🚩 !addcmd command | reply text\nExample: 𝗦𝗠𝗪🚩 !addcmd support | Contact the GC admins.")
-                                        else:
-                                            cmd_name = parts[1].strip().lstrip("!").casefold()
-                                            reply_text = parts[2].split("|", 1)[1].strip()
-                                            if not re.fullmatch(r"[a-z0-9_]{2,32}", cmd_name) or cmd_name in {"help", "panel", "status", "analytics", "rules", "addcmd", "editcmd", "delcmd", "cmds", "clearuser", "resetuser", "unrestrict", "gc", "gcanalytics", "gcs", "gcuser", "session", "safe_mode", "logs", "backup", "lockdown", "unlock", "godmode", "target", "shadowban", "nuke", "resetwarn", "unwarn", "antispam", "report", "inactive", "tagall", "active", "members", "admins", "dp", "profile", "user", "stats", "botinfo"}:
-                                                safe_send_message(thread_id, "❌ Invalid or reserved command name. Use 2-32 letters, digits, or underscores.")
-                                            elif not reply_text:
-                                                safe_send_message(thread_id, "❌ Reply text cannot be empty.")
-                                            else:
-                                                custom_commands = load_custom_commands()
-                                                existed = cmd_name in custom_commands
-                                                custom_commands[cmd_name] = reply_text[:1200]
-                                                save_custom_commands(custom_commands)
-                                                safe_send_message(thread_id, f"✅ Custom command {'updated' if existed else 'created'}: !{cmd_name}\nMembers can use: 𝗦𝗠𝗪🚩 !{cmd_name}")
-                                        continue
-                                    elif command_token == "!delcmd":
-                                        parts = command_text.split(maxsplit=1)
-                                        cmd_name = parts[1].strip().lstrip("!").casefold() if len(parts) > 1 else ""
-                                        custom_commands = load_custom_commands()
-                                        if cmd_name in custom_commands:
-                                            del custom_commands[cmd_name]
-                                            save_custom_commands(custom_commands)
-                                            safe_send_message(thread_id, f"✅ Custom command deleted: !{cmd_name}")
-                                        else:
-                                            safe_send_message(thread_id, f"ℹ️ Custom command not found: !{cmd_name or '(missing name)'}")
-                                        continue
-                                    elif command_token == "!cmds":
-                                        custom_commands = load_custom_commands()
-                                        listing = "\n".join(f"• 𝗦𝗠𝗪🚩 !{name}" for name in sorted(custom_commands)) or "No custom commands created yet."
-                                        safe_send_message(thread_id, "🧩 CUSTOM COMMANDS\n\n" + listing[:1400])
-                                        continue
-                                    elif command_lower == "!lockdown":
-                                        LOCKDOWN_MODE = True
-                                        save_runtime_state()
-                                        safe_send_message(thread_id, "🔒 𝗟𝗢𝗖𝗞𝗗𝗢𝗪𝗡 𝗔𝗖𝗧𝗜𝗩𝗘\n\n🛡️ Non-admin members will be removed on new messages.")
-                                        continue
-                                    elif command_lower == "!unlock":
-                                        LOCKDOWN_MODE = False
-                                        save_runtime_state()
-                                        safe_send_message(thread_id, "🔓 𝗟𝗢𝗖𝗞𝗗𝗢𝗪𝗡 𝗗𝗜𝗦𝗔𝗕𝗟𝗘𝗗\n\n🟢 Normal group activity restored.")
-                                        continue
-                                    elif command_lower == "!godmode":
-                                        status_card = (
-                                            f"⚡🛡️ **𝗚𝗢𝗗𝗠𝗢𝗗𝗘 𝗦𝗧𝗔𝗧𝗨𝗦** 🛡️⚡\n\n"
-                                            f"🔒 **𝗟𝗼𝗰𝗸𝗱𝗼𝘄𝗻** ➜ {'ON 🚨' if LOCKDOWN_MODE else 'OFF 🟢'}\n"
-                                            f"🎯 **𝗧𝗮𝗿𝗴𝗲𝘁𝘀** ➜ {len(TARGETED_USERS)} Users\n"
-                                            f"🛡️ **Anti-Spam** ➜ {'ON' if ANTISPAM_ENABLED else 'OFF'} (limit {ANTISPAM_LIMIT})\n"
-                                            f"👻 **𝗦𝗵𝗮𝗱𝗼𝘄𝗯𝗮𝗻𝘀** ➜ {len(SHADOWBANNED_USERS)} Users\n\n"
-                                            f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}\n"
-                                        )
-                                        safe_send_message(thread_id, status_card)
-                                        continue
-                                    elif command_lower.startswith("!target"):
-                                        parts = command_text.split()
-                                        action = parts[1].lower() if len(parts) > 1 else "help"
-                                        if action in {"remove", "del", "delete", "off"} and len(parts) > 2:
-                                            target = parts[2].lstrip("@").casefold()
-                                            if target in TARGETED_USERS:
-                                                TARGETED_USERS.discard(target)
-                                                save_runtime_state()
-                                                safe_send_message(thread_id, f"✅ Target removed: @{target}")
-                                            else:
-                                                safe_send_message(thread_id, f"ℹ @{target} target list mein nahi hai.")
-                                        elif action in {"clear", "reset", "all"}:
-                                            TARGETED_USERS.clear()
-                                            save_runtime_state()
-                                            safe_send_message(thread_id, "✅ Saare target rules clear kar diye gaye.")
-                                        elif action in {"list", "show"}:
-                                            targets = ", ".join(f"@{name}" for name in sorted(TARGETED_USERS)) or "None"
-                                            safe_send_message(thread_id, f"🎯 Active targets: {targets}")
-                                        elif len(parts) > 1:
-                                            target = parts[1].lstrip("@").casefold()
-                                            TARGETED_USERS.add(target)
-                                            save_runtime_state()
-                                            safe_send_message(thread_id, f"🎯 Target registered: @{target}")
-                                        else:
-                                            safe_send_message(thread_id, "Usage: !target @username | !target remove @username | !target clear | !target list")
-                                        continue
-                                    elif command_lower.startswith("!shadowban"):
-                                        parts = command_text.split()
-                                        action = parts[1].lower() if len(parts) > 1 else "help"
-                                        if action in {"remove", "del", "delete", "off"} and len(parts) > 2:
-                                            target = parts[2].lstrip("@").casefold()
-                                            SHADOWBANNED_USERS.discard(target)
-                                            save_runtime_state()
-                                            safe_send_message(thread_id, f"✅ Shadowban removed for @{target}")
-                                        elif action in {"clear", "reset", "all"}:
-                                            SHADOWBANNED_USERS.clear(); save_runtime_state()
-                                            safe_send_message(thread_id, "✅ All shadowban entries cleared.")
-                                        elif action in {"list", "show"}:
-                                            safe_send_message(thread_id, "👻 Shadowbanned: " + (", ".join("@"+x for x in sorted(SHADOWBANNED_USERS)) or "None"))
-                                        elif len(parts) > 1:
-                                            target = parts[1].lstrip("@").casefold()
-                                            SHADOWBANNED_USERS.add(target); save_runtime_state()
-                                            safe_send_message(thread_id, f"👻 Shadowban rule registered: @{target}")
-                                        else:
-                                            safe_send_message(thread_id, "Usage: !shadowban @user | remove @user | clear | list")
-                                        continue
-                                    elif command_lower.startswith("!nuke"):
-                                        parts = command_text.split()
-                                        if len(parts) > 1:
-                                            target = parts[1].lstrip("@")
+                                            # Clear in-memory anti-flood/repeat windows when a username can be resolved.
                                             try:
-                                                u_id = cl.user_id_from_username(target)
-                                                execute_kick(thread_id, u_id, target, "NUKE BAN")
-                                            except Exception as e:
-                                                safe_send_message(thread_id, f"❌ Could not remove @{target}: {e}")
-                                        else:
-                                            safe_send_message(thread_id, "Usage: !nuke @username")
-                                        continue
-                                    elif command_token == "!kick":
-                                        # Hidden developer-only manual removal. Safe Mode blocks automatic removals,
-                                        # but never blocks an explicit, authorized developer decision.
-                                        parts = command_text.split(maxsplit=1)
-                                        target = parts[1].strip().split()[0].lstrip("@") if len(parts) > 1 else ""
-                                        if not target:
-                                            safe_send_message(thread_id, "Usage: 𝗦𝗠𝗪🚩 !kick @username")
-                                            continue
-                                        target_user = next((u for u in users if str(getattr(u, "username", "") or "").casefold() == target.casefold()), None)
-                                        target_uid = str(getattr(target_user, "pk", "") or "") if target_user else ""
-                                        canonical_username = str(getattr(target_user, "username", "") or target).lstrip("@")
-                                        if not target_uid:
-                                            try:
-                                                target_uid = str(cl.user_id_from_username(canonical_username))
+                                                target_uid = str(cl.user_id_from_username(target))
+                                                user_message_windows.pop(target_uid, None)
+                                                duplicate_message_windows.pop(target_uid, None)
+                                                USER_LAST_MESSAGE_TIME.pop(target_uid, None)
                                             except Exception:
-                                                target_uid = ""
-                                        if not target_uid:
-                                            safe_send_message(thread_id, f"❌ USER NOT FOUND\nUsername: @{canonical_username}\nThe account could not be resolved. Check the exact Instagram username.")
+                                                target_uid = "not resolved"
+                                            ModerationEngine.log_event(thread_id, target_key, "DEVELOPER_CLEAR_USER", f"Warnings/restrictions reset by developer; user_id={target_uid}")
+                                            safe_send_message(thread_id, f"✅ USER RESET COMPLETE\n👤 USERNAME ➜ @{target_key}\n⚠️ Warning count reset; trust score restored; target/shadowban entries removed; temporary spam/flood state cleared when resolvable.\nℹ️ If the user was already removed from the GC, this command does not automatically re-add them.")
                                             continue
-                                        try:
-                                            cl.user_remove_from_thread(thread_id, int(target_uid))
-                                            target_key = canonical_username.casefold()
-                                            TARGETED_USERS.discard(target_key)
-                                            SHADOWBANNED_USERS.discard(target_key)
-                                            save_runtime_state()
-                                            ModerationEngine.log_event(thread_id, target_key, "DEVELOPER_MANUAL_REMOVAL", f"Removed by authorized developer; user_id={target_uid}; Safe Mode={SAFE_MODE}")
-                                            safe_send_message(thread_id, f"🚪 MEMBER REMOVED\n👤 USERNAME ➜ @{canonical_username}\n🆔 USER ID ➜ {target_uid}\n🛡️ SAFE MODE ➜ {'ON (manual developer action allowed)' if SAFE_MODE else 'OFF'}\n👑 AUTHORIZED BY ➜ SMW🚩")
-                                        except Exception as removal_error:
-                                            logging.exception("developer_manual_removal_failed thread=%s uid=%s", thread_id, target_uid)
-                                            safe_send_message(thread_id, f"❌ REMOVAL FAILED\n👤 USERNAME ➜ @{canonical_username}\nReason: Instagram rejected the removal ({type(removal_error).__name__}). Check the bot account's group permissions and API support.")
-                                        continue
-                                    elif command_token in {"!clearuser", "!resetuser", "!unrestrict"}:
-                                        parts = command_text.split(maxsplit=1)
-                                        target = parts[1].strip().split()[0].lstrip("@") if len(parts) > 1 else ""
-                                        if not target:
-                                            safe_send_message(thread_id, "Usage: 𝗦𝗠𝗪🚩 !clearuser @username\nClears this bot's warnings and active restrictions for one user.")
-                                            continue
-                                        target_key = target.casefold()
-                                        # Remove all bot-managed username restrictions.
-                                        TARGETED_USERS.discard(target_key)
-                                        SHADOWBANNED_USERS.discard(target_key)
-                                        save_runtime_state()
-                                        db = SessionLocal()
-                                        try:
-                                            profile = db.query(UserProfile).filter(func.lower(UserProfile.username) == target_key).first()
-                                            if profile:
-                                                profile.warning_count = 0
-                                                profile.trust_score = 100.0
-                                                db.commit()
+                                        elif command_token in {"!resetwarn", "!unwarn"}:
+                                            parts = command_text.split()
+                                            if len(parts) > 1 and parts[1].lower() in {"all", "everyone"}:
+                                                db = SessionLocal()
+                                                try:
+                                                    db.query(UserProfile).update({UserProfile.warning_count: 0}, synchronize_session=False); db.commit()
+                                                    safe_send_message(thread_id, "✅ All tracked warning counts reset.")
+                                                except Exception:
+                                                    db.rollback(); safe_send_message(thread_id, "❌ Could not reset all warnings.")
+                                                finally:
+                                                    db.close()
+                                            elif len(parts) > 1:
+                                                target = parts[1].lstrip("@").strip()
+                                                ModerationEngine.reset_warnings(target)
+                                                safe_send_message(thread_id, f"✅ Warnings reset for @{target}.")
                                             else:
-                                                db.rollback()
-                                        except Exception:
-                                            db.rollback()
-                                            logging.exception("clearuser_profile_reset_failed username=%s", target_key)
-                                        finally:
-                                            db.close()
-                                        # Clear in-memory anti-flood/repeat windows when a username can be resolved.
-                                        try:
-                                            target_uid = str(cl.user_id_from_username(target))
-                                            user_message_windows.pop(target_uid, None)
-                                            duplicate_message_windows.pop(target_uid, None)
-                                            USER_LAST_MESSAGE_TIME.pop(target_uid, None)
-                                        except Exception:
-                                            target_uid = "not resolved"
-                                        ModerationEngine.log_event(thread_id, target_key, "DEVELOPER_CLEAR_USER", f"Warnings/restrictions reset by developer; user_id={target_uid}")
-                                        safe_send_message(thread_id, f"✅ USER RESET COMPLETE\n👤 USERNAME ➜ @{target_key}\n⚠️ Warning count reset; trust score restored; target/shadowban entries removed; temporary spam/flood state cleared when resolvable.\nℹ️ If the user was already removed from the GC, this command does not automatically re-add them.")
-                                        continue
-                                    elif command_token in {"!resetwarn", "!unwarn"}:
-                                        parts = command_text.split()
-                                        if len(parts) > 1 and parts[1].lower() in {"all", "everyone"}:
+                                                safe_send_message(thread_id, "Usage: !resetwarn @username | !resetwarn all")
+                                            continue
+                                        elif command_token == "!antispam":
+                                            parts = command_text.split()
+                                            action = parts[1].lower() if len(parts) > 1 else "status"
+                                            if action in {"on", "off"}:
+                                                ANTISPAM_ENABLED = action == "on"; save_runtime_state()
+                                                safe_send_message(thread_id, f"🛡️ Anti-spam {action.upper()}.")
+                                            elif action == "limit" and len(parts) > 2:
+                                                try:
+                                                    ANTISPAM_LIMIT = max(2, min(10, int(parts[2]))); save_runtime_state()
+                                                    safe_send_message(thread_id, f"✅ Duplicate threshold set to {ANTISPAM_LIMIT} messages/60s.")
+                                                except ValueError:
+                                                    safe_send_message(thread_id, "Usage: !antispam limit 2-10")
+                                            else:
+                                                safe_send_message(thread_id, f"Anti-spam: {'ON' if ANTISPAM_ENABLED else 'OFF'} | threshold: {ANTISPAM_LIMIT}/60s")
+                                            continue
+                                        elif command_token == "!inactive":
+                                            parts = command_text.split()
+                                            try: days = max(1, min(365, int(parts[1]))) if len(parts) > 1 else 30
+                                            except ValueError: days = 30
+                                            cutoff = get_utc_now().replace(tzinfo=None) - __import__('datetime').timedelta(days=days)
                                             db = SessionLocal()
                                             try:
-                                                db.query(UserProfile).update({UserProfile.warning_count: 0}, synchronize_session=False); db.commit()
-                                                safe_send_message(thread_id, "✅ All tracked warning counts reset.")
-                                            except Exception:
-                                                db.rollback(); safe_send_message(thread_id, "❌ Could not reset all warnings.")
-                                            finally:
-                                                db.close()
-                                        elif len(parts) > 1:
-                                            target = parts[1].lstrip("@").strip()
-                                            ModerationEngine.reset_warnings(target)
-                                            safe_send_message(thread_id, f"✅ Warnings reset for @{target}.")
-                                        else:
-                                            safe_send_message(thread_id, "Usage: !resetwarn @username | !resetwarn all")
-                                        continue
-                                    elif command_token == "!antispam":
-                                        parts = command_text.split()
-                                        action = parts[1].lower() if len(parts) > 1 else "status"
-                                        if action in {"on", "off"}:
-                                            ANTISPAM_ENABLED = action == "on"; save_runtime_state()
-                                            safe_send_message(thread_id, f"🛡️ Anti-spam {action.upper()}.")
-                                        elif action == "limit" and len(parts) > 2:
+                                                rows = db.query(UserProfile).filter(UserProfile.last_active < cutoff).order_by(UserProfile.last_active.asc()).limit(30).all()
+                                                report = "\n".join(f"@{r.username} — last active {r.last_active}" for r in rows) or "No tracked inactive users."
+                                                safe_send_message(thread_id, f"📋 INACTIVE REPORT (>{days} days)\n{report}")
+                                            finally: db.close()
+                                            continue
+                                        elif command_token == "!report":
+                                            db = SessionLocal()
                                             try:
-                                                ANTISPAM_LIMIT = max(2, min(10, int(parts[2]))); save_runtime_state()
-                                                safe_send_message(thread_id, f"✅ Duplicate threshold set to {ANTISPAM_LIMIT} messages/60s.")
-                                            except ValueError:
-                                                safe_send_message(thread_id, "Usage: !antispam limit 2-10")
-                                        else:
-                                            safe_send_message(thread_id, f"Anti-spam: {'ON' if ANTISPAM_ENABLED else 'OFF'} | threshold: {ANTISPAM_LIMIT}/60s")
-                                        continue
-                                    elif command_token == "!inactive":
-                                        parts = command_text.split()
-                                        try: days = max(1, min(365, int(parts[1]))) if len(parts) > 1 else 30
-                                        except ValueError: days = 30
-                                        cutoff = get_utc_now().replace(tzinfo=None) - __import__('datetime').timedelta(days=days)
-                                        db = SessionLocal()
-                                        try:
-                                            rows = db.query(UserProfile).filter(UserProfile.last_active < cutoff).order_by(UserProfile.last_active.asc()).limit(30).all()
-                                            report = "\n".join(f"@{r.username} — last active {r.last_active}" for r in rows) or "No tracked inactive users."
-                                            safe_send_message(thread_id, f"📋 INACTIVE REPORT (>{days} days)\n{report}")
-                                        finally: db.close()
-                                        continue
-                                    elif command_token == "!report":
-                                        db = SessionLocal()
-                                        try:
-                                            total = db.query(UserProfile).count()
-                                            msgs = db.query(func.sum(UserProfile.total_messages)).scalar() or 0
-                                            warns = db.query(func.sum(UserProfile.warning_count)).scalar() or 0
-                                            logs = db.query(SecurityLog).count()
-                                            safe_send_message(thread_id, f"📊 SMW GROUP REPORT\nTracked members: {total}\nRecorded messages: {msgs}\nCurrent warnings: {warns}\nSecurity events: {logs}")
-                                        finally: db.close()
-                                        continue
-                                    elif command_lower in ("!tagall", "!active", "!members"):
-                                        all_tags = [fix_mention(getattr(u, "username", "")) for u in users if getattr(u, "username", None)]
-                                        if not all_tags:
-                                            safe_send_message(thread_id, "❌ No visible group members were found.")
-                                        else:
-                                            intro = "📢 EVERYONE, PLEASE BE ACTIVE!\n\n"
-                                            chunks = []
-                                            current = intro
-                                            for tag in all_tags:
-                                                addition = tag + " "
-                                                if len(current) + len(addition) > 1700:
-                                                    chunks.append(current.rstrip())
-                                                    current = "📢 EVERYONE, PLEASE BE ACTIVE! (continued)\n\n"
-                                                current += addition
-                                            current += f"\n\n🤖 BOT ➜ {fix_mention(BOT_USERNAME)}"
-                                            chunks.append(current)
-                                            for chunk in chunks:
-                                                safe_send_message(thread_id, chunk)
-                                        continue
-                                    elif command_lower == "!admins":
-                                        if gc_admins:
-                                            admin_names = []
-                                            for u in users:
-                                                if str(getattr(u, "pk", "")) in admin_ids_str:
-                                                    un = getattr(u, "username", None)
-                                                    if un:
-                                                        admin_names.append(f"👑 ➜ {fix_mention(un)}")
+                                                total = db.query(UserProfile).count()
+                                                msgs = db.query(func.sum(UserProfile.total_messages)).scalar() or 0
+                                                warns = db.query(func.sum(UserProfile.warning_count)).scalar() or 0
+                                                logs = db.query(SecurityLog).count()
+                                                safe_send_message(thread_id, f"📊 SMW GROUP REPORT\nTracked members: {total}\nRecorded messages: {msgs}\nCurrent warnings: {warns}\nSecurity events: {logs}")
+                                            finally: db.close()
+                                            continue
+                                        elif command_lower in ("!tagall", "!active", "!members"):
+                                            all_tags = [fix_mention(getattr(u, "username", "")) for u in users if getattr(u, "username", None)]
+                                            if not all_tags:
+                                                safe_send_message(thread_id, "❌ No visible group members were found.")
+                                            else:
+                                                intro = "📢 EVERYONE, PLEASE BE ACTIVE!\n\n"
+                                                chunks = []
+                                                current = intro
+                                                for tag in all_tags:
+                                                    addition = tag + " "
+                                                    if len(current) + len(addition) > 1700:
+                                                        chunks.append(current.rstrip())
+                                                        current = "📢 EVERYONE, PLEASE BE ACTIVE! (continued)\n\n"
+                                                    current += addition
+                                                current += f"\n\n🤖 BOT ➜ {fix_mention(BOT_USERNAME)}"
+                                                chunks.append(current)
+                                                for chunk in chunks:
+                                                    safe_send_message(thread_id, chunk)
+                                            continue
+                                        elif command_lower == "!admins":
+                                            if gc_admins:
+                                                admin_names = []
+                                                for u in users:
+                                                    if str(getattr(u, "pk", "")) in admin_ids_str:
+                                                        un = getattr(u, "username", None)
+                                                        if un:
+                                                            admin_names.append(f"👑 ➜ {fix_mention(un)}")
 
-                                            admin_card = (
-                                                f"👑🛡️ **𝗚𝗖 𝗔𝗗𝗠𝗜𝗡𝗜𝗦𝗧𝗥𝗔𝗧𝗢𝗥𝗦** 🛡️👑\n\n"
-                                                f"📊 **𝗧𝗢𝗧𝗔𝗟** ➜ {len(gc_admins)}\n\n"
-                                                f"{'\n'.join(admin_names)}\n\n"
+                                                admin_card = (
+                                                    f"👑🛡️ **𝗚𝗖 𝗔𝗗𝗠𝗜𝗡𝗜𝗦𝗧𝗥𝗔𝗧𝗢𝗥𝗦** 🛡️👑\n\n"
+                                                    f"📊 **𝗧𝗢𝗧𝗔𝗟** ➜ {len(gc_admins)}\n\n"
+                                                    f"{'\n'.join(admin_names)}\n\n"
+                                                    f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
+                                                )
+                                                safe_send_message(thread_id, admin_card)
+                                            else:
+                                                safe_send_message(thread_id, "ℹ️ Group admin list is not exposed in this thread snapshot.")
+                                            continue
+                                        elif command_token == "!dp":
+                                            parts = command_text.split()
+                                            target_name = parts[1].lstrip("@") if len(parts) > 1 else sender_username
+                                            try:
+                                                u_info = cl.user_info_by_username(target_name)
+                                                if u_info:
+                                                    dp_url = getattr(getattr(u_info, "hd_profile_pic_url_info", None), "url", None) or getattr(u_info, "profile_pic_url_hd", None) or u_info.profile_pic_url
+                                                    photo_path = cl.photo_download_by_url(dp_url, filename=f"{target_name}_dp.jpg")
+                                                    # All outbound operations respect the same global 403 cooldown.
+                                                    if time.time() < SEND_COOLDOWN_UNTIL:
+                                                        logging.info("outgoing_photo_skipped_during_403_cooldown thread_id=%s", str(thread_id))
+                                                        continue
+                                                    try:
+                                                        cl.direct_send_photo(photo_path, thread_ids=[thread_id])
+                                                    except Exception as send_exc:
+                                                        if _item_ack_403_signature(send_exc):
+                                                            _pause_after_item_ack_403(send_exc, "direct_send_photo", thread_id)
+                                                            continue
+                                                        raise
+
+                                                    dp_card = (
+                                                        f"📸✨ **𝗛𝗗 𝗗𝗣 𝗙𝗘𝗧𝗖𝗛𝗘𝗗** ✨📸\n\n"
+                                                        f"👤 𝗨𝗦𝗘𝗥 ➜ {fix_mention(target_name)}\n\n"
+                                                        f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
+                                                    )
+                                                    safe_send_message(thread_id, dp_card)
+
+                                                    if os.path.exists(photo_path):
+                                                        os.remove(photo_path)
+                                            except Exception:
+                                                safe_send_message(thread_id, f"❌ Failed to fetch DP for {fix_mention(target_name)}!")
+                                            continue
+                                        elif command_token in {"!profile", "!user"}:
+                                            parts = command_text.split()
+                                            target_name = parts[1].lstrip("@") if len(parts) > 1 else sender_username
+                                            try:
+                                                u_info = cl.user_info_by_username(target_name)
+                                                if u_info:
+                                                    def format_count(count):
+                                                        if count >= 1_000_000:
+                                                            return f"{count / 1_000_000:.1f}M"
+                                                        elif count >= 1_000:
+                                                            return f"{count / 1_000:.1f}k"
+                                                        return str(count)
+
+                                                    tracked_since = "Not recorded by this bot"
+                                                    try:
+                                                        with SessionLocal() as db:
+                                                            tracked = db.query(UserProfile).filter(UserProfile.username == target_name.lower()).first()
+                                                            if tracked and tracked.join_date:
+                                                                tracked_since = tracked.join_date.strftime("%Y-%m-%d")
+                                                    except Exception:
+                                                        pass
+
+                                                    profile_card = (
+                                                        f"👤✨ **𝗨𝗦𝗘𝗥 𝗣𝗥𝗢𝗙𝗜𝗟𝗘 𝗗𝗘𝗧𝗔𝗜𝗟𝗦** ✨👤\n\n"
+                                                        f"📌 **𝗡𝗮𝗺𝗲** ➜ {u_info.full_name or 'Not Provided'}\n"
+                                                        f"🆔 **𝗨𝘀𝗲𝗿𝗻𝗮𝗺𝗲** ➜ @{u_info.username}\n"
+                                                        f"🔢 **𝗨𝘀𝗲𝗿 𝗜𝗗** ➜ `{u_info.pk}`\n"
+                                                        f"🗓️ **𝗙𝗶𝗿𝘀𝘁 𝗥𝗲𝗰𝗼𝗿𝗱𝗲𝗱** ➜ {tracked_since}\n"
+                                                        f"👥 **𝗙𝗼𝗹𝗹𝗼𝘄𝗲𝗿𝘀** ➜ {format_count(u_info.follower_count)}\n"
+                                                        f"🫂 **𝗙𝗼𝗹𝗹𝗼𝘄𝗶𝗻𝗴** ➜ {format_count(u_info.following_count)}\n"
+                                                        f"📸 **𝗧𝗼𝘁𝗮𝗹 𝗣𝗼𝘀𝘁𝘀** ➜ {u_info.media_count}\n"
+                                                        f"🔗 **𝗕𝗶𝗼** ➜ {u_info.biography.replace('\n', ' ') if u_info.biography else 'No Bio'}\n"
+                                                        f"🔒 **𝗣𝗿𝗶𝘃𝗮𝘁𝗲** ➜ {'Yes 🔒' if u_info.is_private else 'No 🟢'}\n\n"
+                                                        f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
+                                                    )
+                                                    safe_send_message(thread_id, profile_card)
+                                            except Exception as e:
+                                                safe_send_message(thread_id, f"❌ Error fetching profile: {str(e)}")
+                                            continue
+                                        elif command_token == "!stats":
+                                            parts = command_text.split()
+                                            target_name = parts[1].lstrip("@") if len(parts) > 1 else sender_username
+                                            stats_msg = ModerationEngine.get_user_stats(cl, target_name)
+                                            safe_send_message(thread_id, stats_msg)
+                                            continue
+                                        elif command_lower == "!botinfo":
+                                            info_card = (
+                                                f"🤖✨ **𝗕𝗢𝗧 𝗜𝗡𝗙𝗢𝗥𝗠𝗔𝗧𝗜𝗢𝗡** ✨🤖\n\n"
+                                                f"⚡ **Status** ➜ ONLINE & ACTIVE (Instant Fast Reply)\n"
                                                 f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
                                             )
-                                            safe_send_message(thread_id, admin_card)
-                                        else:
-                                            safe_send_message(thread_id, "ℹ️ Group admin list is not exposed in this thread snapshot.")
-                                        continue
-                                    elif command_token == "!dp":
-                                        parts = command_text.split()
-                                        target_name = parts[1].lstrip("@") if len(parts) > 1 else sender_username
-                                        try:
-                                            u_info = cl.user_info_by_username(target_name)
-                                            if u_info:
-                                                dp_url = getattr(getattr(u_info, "hd_profile_pic_url_info", None), "url", None) or getattr(u_info, "profile_pic_url_hd", None) or u_info.profile_pic_url
-                                                photo_path = cl.photo_download_by_url(dp_url, filename=f"{target_name}_dp.jpg")
-                                                # All outbound operations respect the same global 403 cooldown.
-                                                if time.time() < SEND_COOLDOWN_UNTIL:
-                                                    logging.info("outgoing_photo_skipped_during_403_cooldown thread_id=%s", str(thread_id))
-                                                    continue
-                                                try:
-                                                    cl.direct_send_photo(photo_path, thread_ids=[thread_id])
-                                                except Exception as send_exc:
-                                                    if _item_ack_403_signature(send_exc):
-                                                        _pause_after_item_ack_403(send_exc, "direct_send_photo", thread_id)
-                                                        continue
-                                                    raise
+                                            safe_send_message(thread_id, info_card)
+                                            continue
+                                        elif command_token.startswith("!"):
+                                            safe_send_message(thread_id, f"❓ Unknown command: {command_token}\nUse 𝗦𝗠𝗪🚩 !help to see the available commands.")
+                                            continue
 
-                                                dp_card = (
-                                                    f"📸✨ **𝗛𝗗 𝗗𝗣 𝗙𝗘𝗧𝗖𝗛𝗘𝗗** ✨📸\n\n"
-                                                    f"👤 𝗨𝗦𝗘𝗥 ➜ {fix_mention(target_name)}\n\n"
-                                                    f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
-                                                )
-                                                safe_send_message(thread_id, dp_card)
-
-                                                if os.path.exists(photo_path):
-                                                    os.remove(photo_path)
-                                        except Exception:
-                                            safe_send_message(thread_id, f"❌ Failed to fetch DP for {fix_mention(target_name)}!")
-                                        continue
-                                    elif command_token in {"!profile", "!user"}:
-                                        parts = command_text.split()
-                                        target_name = parts[1].lstrip("@") if len(parts) > 1 else sender_username
-                                        try:
-                                            u_info = cl.user_info_by_username(target_name)
-                                            if u_info:
-                                                def format_count(count):
-                                                    if count >= 1_000_000:
-                                                        return f"{count / 1_000_000:.1f}M"
-                                                    elif count >= 1_000:
-                                                        return f"{count / 1_000:.1f}k"
-                                                    return str(count)
-
-                                                tracked_since = "Not recorded by this bot"
-                                                try:
-                                                    with SessionLocal() as db:
-                                                        tracked = db.query(UserProfile).filter(UserProfile.username == target_name.lower()).first()
-                                                        if tracked and tracked.join_date:
-                                                            tracked_since = tracked.join_date.strftime("%Y-%m-%d")
-                                                except Exception:
-                                                    pass
-
-                                                profile_card = (
-                                                    f"👤✨ **𝗨𝗦𝗘𝗥 𝗣𝗥𝗢𝗙𝗜𝗟𝗘 𝗗𝗘𝗧𝗔𝗜𝗟𝗦** ✨👤\n\n"
-                                                    f"📌 **𝗡𝗮𝗺𝗲** ➜ {u_info.full_name or 'Not Provided'}\n"
-                                                    f"🆔 **𝗨𝘀𝗲𝗿𝗻𝗮𝗺𝗲** ➜ @{u_info.username}\n"
-                                                    f"🔢 **𝗨𝘀𝗲𝗿 𝗜𝗗** ➜ `{u_info.pk}`\n"
-                                                    f"🗓️ **𝗙𝗶𝗿𝘀𝘁 𝗥𝗲𝗰𝗼𝗿𝗱𝗲𝗱** ➜ {tracked_since}\n"
-                                                    f"👥 **𝗙𝗼𝗹𝗹𝗼𝘄𝗲𝗿𝘀** ➜ {format_count(u_info.follower_count)}\n"
-                                                    f"🫂 **𝗙𝗼𝗹𝗹𝗼𝘄𝗶𝗻𝗴** ➜ {format_count(u_info.following_count)}\n"
-                                                    f"📸 **𝗧𝗼𝘁𝗮𝗹 𝗣𝗼𝘀𝘁𝘀** ➜ {u_info.media_count}\n"
-                                                    f"🔗 **𝗕𝗶𝗼** ➜ {u_info.biography.replace('\n', ' ') if u_info.biography else 'No Bio'}\n"
-                                                    f"🔒 **𝗣𝗿𝗶𝘃𝗮𝘁𝗲** ➜ {'Yes 🔒' if u_info.is_private else 'No 🟢'}\n\n"
-                                                    f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
-                                                )
-                                                safe_send_message(thread_id, profile_card)
-                                        except Exception as e:
-                                            safe_send_message(thread_id, f"❌ Error fetching profile: {str(e)}")
-                                        continue
-                                    elif command_token == "!stats":
-                                        parts = command_text.split()
-                                        target_name = parts[1].lstrip("@") if len(parts) > 1 else sender_username
-                                        stats_msg = ModerationEngine.get_user_stats(cl, target_name)
-                                        safe_send_message(thread_id, stats_msg)
-                                        continue
-                                    elif command_lower == "!botinfo":
-                                        info_card = (
-                                            f"🤖✨ **𝗕𝗢𝗧 𝗜𝗡𝗙𝗢𝗥𝗠𝗔𝗧𝗜𝗢𝗡** ✨🤖\n\n"
-                                            f"⚡ **Status** ➜ ONLINE & ACTIVE (Instant Fast Reply)\n"
-                                            f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
-                                        )
-                                        safe_send_message(thread_id, info_card)
-                                        continue
-                                    elif command_token.startswith("!"):
-                                        safe_send_message(thread_id, f"❓ Unknown command: {command_token}\nUse 𝗦𝗠𝗪🚩 !help to see the available commands.")
-                                        continue
+                            except Exception as message_error:
+                                # Isolate malformed shared URLs / unsupported message payloads.
+                                # Log only a short ID/type, then keep processing other messages.
+                                failed_id = str(getattr(last_msg, "id", "") or "unknown")[:80]
+                                logging.exception("message_processing_error message_id=%s error_type=%s", failed_id, type(message_error).__name__)
+                                LAST_POLL_ERROR = f"message processing error: {type(message_error).__name__}"
+                                continue
 
                     is_first_run = False
                     # Reset the 403 backoff only after a complete successful poll cycle.
