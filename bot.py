@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 𝗦𝗠𝗪🚩 𝗚𝗥𝗢𝗨𝗣 𝗖𝗛𝗔𝗧 𝗣𝗥𝗢𝗧𝗘𝗖𝗧𝗜𝗢𝗡 𝗕𝗢𝗧
-𝗦𝗠𝗪🚩 Complete Admin-Gated Build v7 — per-message crash isolation and shared-link detection.
-Preserves the existing GC features, admin gate, cards and database. Adds defensive shared-link extraction, per-message exception isolation, and bounded backoff
-for repeated Instagram 401/403 failures.
+𝗦𝗠𝗪🚩 Complete Admin-Gated Build v8 — auth-safe recovery and link-crash isolation.
+Preserves the existing GC features, admin gate, cards and database. Adds defensive shared-link extraction, per-message exception isolation, and bounded backoff for repeated Instagram 403 failures; 401 authentication rejection now stops safely.
 
 Important: client-side handling cannot override Instagram-side access decisions.
 Keep session credentials private and persistent.
@@ -708,20 +707,13 @@ def start_bot():
                     login_error = exc
                     logging.exception("instagram_session_id_login_failed")
                     print(f"[!] Session ID login failed: {type(exc).__name__}: {exc}")
-                    if not has_credentials:
-                        raise RuntimeError(
-                            "Session ID login failed and username/password Variables are not both set. "
-                            f"Original error: {type(exc).__name__}: {exc}"
-                        ) from exc
-                    # Use a fresh client for fallback, so failed Session ID cookies do not leak in.
-                    print("[*] Trying username/password recovery login...")
-                    # Use a fresh default Client for credential recovery. Older session.json
-                    # files can carry obsolete Instagram app/device metadata and trigger
-                    # needs_upgrade even when the installed instagrapi is current.
-                    cl = Client()
-                    cl.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-                    logging.info("instagram_credential_fallback_login_succeeded")
-                    print("[+] Successfully recovered login with configured credentials!")
+                    # A configured Session ID failing must NOT trigger an automatic
+                    # username/password login: repeated recovery attempts can provoke
+                    # Instagram email challenges and further account restrictions.
+                    # Keep session.json untouched and stop for a deliberate manual recovery.
+                    print("[STOP] Session ID login failed. Automatic password fallback is disabled.")
+                    print("[STOP] Check the Session ID privately, then restart only after it is verified.")
+                    raise SystemExit(2) from exc
             elif has_credentials:
                 # No Session ID: reuse saved settings/device identifiers, then authenticate.
                 if SESSION_SETTINGS_FILE.exists():
@@ -1740,8 +1732,19 @@ def start_bot():
                                             continue
 
                             except Exception as message_error:
-                                # Isolate malformed shared URLs / unsupported message payloads.
-                                # Log only a short ID/type, then keep processing other messages.
+                                # A malformed message/link is isolated to this message.
+                                # Authentication failures are NOT swallowed here: let the
+                                # outer auth handler stop safely instead of masking a 401.
+                                http_status, api_status_code, error_code, action = _instagram_error_signature(message_error)
+                                err_text = str(message_error).casefold()
+                                is_auth_error = (
+                                    http_status == 401 or api_status_code == 401
+                                    or "401 client error" in err_text
+                                    or "unauthorized for url" in err_text
+                                    or "clientunauthorizederror" in type(message_error).__name__.casefold()
+                                )
+                                if is_auth_error:
+                                    raise
                                 failed_id = str(getattr(last_msg, "id", "") or "unknown")[:80]
                                 logging.exception("message_processing_error message_id=%s error_type=%s", failed_id, type(message_error).__name__)
                                 LAST_POLL_ERROR = f"message processing error: {type(message_error).__name__}"
@@ -1829,12 +1832,11 @@ def start_bot():
                     backoff_seconds, AUTH_FAILURE_COUNT, type(e).__name__
                 )
                 print(
-                    f"[!] Instagram returned 401 Unauthorized ({type(e).__name__}). "
-                    f"Pausing {backoff_seconds}s before retry; check whether the Session ID is still valid. "
-                    "The bot will not repeatedly log in every few seconds."
+                    f"[STOP] Instagram returned 401 Unauthorized ({type(e).__name__}). "
+                    "Authentication was rejected. The bot is stopping to avoid repeated login attempts. "
+                    "Verify the Session ID privately before restarting; session.json was not deleted."
                 )
-                time.sleep(backoff_seconds)
-                continue
+                return
             logging.exception("critical_connection_or_login_error")
             print(f"[!] Critical error: {type(e).__name__}: {e}")
             time.sleep(min(60, POLL_INTERVAL * 2))
