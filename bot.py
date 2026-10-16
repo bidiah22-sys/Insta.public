@@ -51,6 +51,24 @@ TOTAL_SEEN_MESSAGES = 0
 LAST_SUCCESSFUL_POLL = None
 LAST_POLL_ERROR = "None"
 logging.basicConfig(filename="bot_runtime.log", level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+# A local hold marker prevents Railway/process restarts from immediately retrying
+# an Instagram session that has already been rejected. Clear it only after manual
+# account/session verification. For persistent behavior across redeploys, mount a volume.
+AUTH_HOLD_FILE = Path(os.getenv("AUTH_HOLD_FILE", "smw_auth_hold.json"))
+
+def write_auth_hold(reason: str) -> None:
+    try:
+        AUTH_HOLD_FILE.write_text(json.dumps({
+            "status": "AUTH_HOLD",
+            "reason": str(reason)[:300],
+            "time_utc": datetime.now(timezone.utc).isoformat(),
+            "instruction": "Verify account in official Instagram app; replace session only after account is healthy; then delete this file manually."
+        }, indent=2), encoding="utf-8")
+    except Exception as marker_error:
+        logging.error("could_not_write_auth_hold_marker: %s", type(marker_error).__name__)
+
+def auth_hold_exists() -> bool:
+    return AUTH_HOLD_FILE.exists()
 
 SHADOWBANNED_USERS = set()
 TARGETED_USERS = set()
@@ -501,132 +519,14 @@ def detect_abuse_reason(text: str) -> str | None:
     return None
 
 
-def detect_link_type(text: str) -> str | None:
-    """Detect URLs/domains in ordinary text, including punctuation-wrapped links."""
-    value = unicodedata.normalize("NFKC", str(text or "")).casefold()
-    value = re.sub(r"[\u200b-\u200f\ufeff]", "", value)
-    if not value.strip():
-        return None
-    # Match full URLs, www links, common shorteners/social domains, and bare domains
-    # even when followed by punctuation or a query string.
-    url_pattern = re.compile(
-        r"(?<![\w@])(?:https?://|www\.)[^\s<>\"']+|"
-        r"(?<![\w@])(?:instagram\.com|instagr\.am|ig\.me|threads\.net|"
-        r"bit\.ly|tinyurl\.com|t\.me|wa\.me|youtu\.be|youtube\.com|"
-        r"linktr\.ee|facebook\.com|x\.com|tiktok\.com|discord\.gg|"
-        r"chat\.whatsapp\.com)(?:/[^\s<>\"']*)?",
-        re.IGNORECASE,
-    )
-    if url_pattern.search(value):
-        if re.search(r"(?:instagram\.com|instagr\.am)/(?:reel|reels)(?:/|\b)", value, re.IGNORECASE):
-            return "Instagram Reel Link"
-        if re.search(r"(?:instagram\.com|instagr\.am)/(?:p|tv)/", value, re.IGNORECASE):
-            return "Instagram Post / Video Link"
-        if re.search(r"(?:instagram\.com|instagr\.am)/(?:channel|channels|broadcast|broadcasts|direct/t/)", value, re.IGNORECASE):
-            return "Instagram Channel / Broadcast Link"
-        if re.search(r"(?:ig\.me|instagram\.com)/", value, re.IGNORECASE):
-            return "Instagram Shared Link"
-        return "External Link"
-    # Generic domain detector: accept ordinary and newer TLDs instead of a short allow-list.
-    # A dot plus an alphabetic TLD (2-63 chars) is required to reduce false positives.
-    bare_domain = re.compile(
-        r"(?<![\w@])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
-        r"[a-z]{2,63}(?::\d{2,5})?(?:/[^\s<>\"']*)?(?:\?[^\s<>\"']*)?(?:#[^\s<>\"']*)?",
-        re.IGNORECASE,
-    )
-    if bare_domain.search(value):
-        return "Bare Domain Link"
-    return None
-
-
-def get_message_detection_text(message, plain_text: str = "") -> str:
-    """Extract URL-bearing data from text and nested Instagram share payloads.
-
-    This is deliberately a local inspection only: it never opens/fetches the URL.
-    Instagram shared links may be represented as nested dicts/objects rather than
-    appearing in message.text, so inspect a bounded set of known metadata fields.
-    """
-    parts = []
-    seen_text = set()
-    visited = set()
-    url_keys = {
-        "url", "href", "link", "weburi", "web_uri", "permalink",
-        "share_url", "shareurl", "external_url", "externalurl",
-        "display_url", "displayurl", "video_url", "videourl",
-        "caption", "title", "text", "message", "shortcode",
-    }
-    nested_keys = {
-        "extra", "link", "url", "href", "caption", "title", "text",
-        "media", "media_share", "mediashare", "reel_share", "reelshare",
-        "clip", "xma_share", "xmashare", "share", "shared_media",
-        "sharedmedia", "visual_media", "visualmedia", "attachment",
-        "attachments", "payload", "message", "item", "context",
-        "content", "story", "reel", "video", "image", "preview",
-        "metadata", "web_link", "weblink", "link_context", "linkcontext",
-    }
-    def add(value):
-        if isinstance(value, str):
-            value = value.strip()
-            if value and value not in seen_text:
-                seen_text.add(value)
-                parts.append(value)
-
-    add(plain_text)
-    # Traverse only a bounded depth and a capped number of nodes so unusual API
-    # payloads cannot make message inspection expensive or recurse forever.
-    stack = [(message, 0)]
-    while stack and len(visited) < 500:
-        obj, depth = stack.pop()
-        if obj is None or depth > 5:
-            continue
-        if isinstance(obj, str):
-            add(obj)
-            continue
-        if isinstance(obj, (int, float, bool, bytes)):
-            continue
-        ident = id(obj)
-        if ident in visited:
-            continue
-        visited.add(ident)
-        if isinstance(obj, dict):
-            for key, value in obj.items():
-                key_norm = str(key).casefold().replace("-", "_")
-                if key_norm in url_keys or any(term in key_norm for term in ("url", "link", "caption", "permalink")):
-                    if isinstance(value, str):
-                        add(value)
-                    elif isinstance(value, (dict, list, tuple)):
-                        stack.append((value, depth + 1))
-                if key_norm in nested_keys or any(term in key_norm for term in ("share", "media", "attachment", "context")):
-                    if isinstance(value, (dict, list, tuple)) or not isinstance(value, (str, int, float, bool, bytes, type(None))):
-                        stack.append((value, depth + 1))
-        elif isinstance(obj, (list, tuple, set, deque)):
-            for value in list(obj)[:100]:
-                if isinstance(value, (str, dict, list, tuple)) or hasattr(value, "__dict__"):
-                    stack.append((value, depth + 1))
-        else:
-            # Avoid walking arbitrary object internals. Read only fields commonly
-            # used by instagrapi direct-message and share models.
-            for field in nested_keys | url_keys | {
-                "extra", "item_type", "media_type", "code", "pk", "id",
-                "message_metadata", "visual_media", "reel_share", "media_share",
-            }:
-                try:
-                    value = getattr(obj, field, None)
-                except Exception:
-                    continue
-                if isinstance(value, str):
-                    if field.casefold() in url_keys or any(t in field.casefold() for t in ("url", "link", "caption", "permalink")):
-                        add(value)
-                elif isinstance(value, (dict, list, tuple, set, deque)) or hasattr(value, "__dict__"):
-                    stack.append((value, depth + 1))
-    return " ".join(parts)
-
-
-
 def start_bot():
     global LOCKDOWN_MODE, SHADOWBANNED_USERS, TARGETED_USERS, USER_LAST_MESSAGE_TIME, SAFE_MODE, ANTISPAM_ENABLED, ANTISPAM_LIMIT
     init_db()
     restore_runtime_state()
+
+    if auth_hold_exists():
+        print(f"[AUTH HOLD] Found {AUTH_HOLD_FILE}. Bot will not attempt Instagram login again until you verify the account/session and manually remove this marker.")
+        return
 
     while True:
         try:
@@ -1014,8 +914,6 @@ def start_bot():
                                         f"🛡️ 𝗞𝗘𝗘𝗣 𝗧𝗛𝗘 𝗚𝗖 𝗖𝗟𝗘𝗔𝗡\n\n"
                                         f"📢 𝗡𝗢 𝗦𝗣𝗔𝗠 • 𝗡𝗢 𝗙𝗟𝗢𝗢𝗗𝗜𝗡𝗚\n"
                                         f"🚫 𝗗𝗢𝗡'𝗧 𝗦𝗘𝗡𝗗 𝗥𝗘𝗣𝗘𝗔𝗧𝗘𝗗 𝗠𝗘𝗦𝗦𝗔𝗚𝗘𝗦\n\n"
-                                        f"🔗 𝗡𝗢 𝗨𝗡𝗔𝗨𝗧𝗛𝗢𝗥𝗜𝗭𝗘𝗗 𝗟𝗜𝗡𝗞𝗦\n"
-                                        f"📩 𝗔𝗦𝗞 𝗔𝗗𝗠𝗜𝗡𝗦 𝗙𝗜𝗥𝗦𝗧\n\n"
                                         f"👑 𝗥𝗘𝗦𝗣𝗘𝗖𝗧 𝗔𝗗𝗠𝗜𝗡𝗦 & 𝗠𝗢𝗗𝗘𝗥𝗔𝗧𝗢𝗥𝗦\n"
                                         f"✨ 𝗙𝗢𝗟𝗟𝗢𝗪 𝗢𝗙𝗙𝗜𝗖𝗜𝗔𝗟 𝗜𝗡𝗦𝗧𝗥𝗨𝗖𝗧𝗜𝗢𝗡𝗦\n\n"
                                         f"⚠️ 𝗥𝗨𝗟𝗘𝗦 𝗕𝗥𝗘𝗔𝗞 = 𝗪𝗔𝗥𝗡𝗜𝗡𝗚\n"
@@ -1027,42 +925,27 @@ def start_bot():
                                     safe_send_message(thread_id, rules_card)
                                     continue
 
+                                # Abuse-only moderation: links and URL metadata are intentionally ignored.
                                 abuse_reason = detect_abuse_reason(text)
-                                detection_text = get_message_detection_text(last_msg, text)
-                                link_type = detect_link_type(detection_text)
-                                link_violation = bool(link_type)
-                                if abuse_reason or link_violation:
+                                if abuse_reason:
                                     warns, trust = ModerationEngine.add_warning(sender_username)
-                                    reason = abuse_reason or f"Unauthorized {link_type}"
-                                    detected_link_match = re.search(
-                                        r"(?i)(?<![\w@])(?:[a-z][a-z0-9+.-]{1,20}://|www\.)[^\s<>\"']+|"
-                                        r"(?<![\w@])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}"
-                                        r"(?::\d{2,5})?(?:/[^\s<>\"']*)?(?:\?[^\s<>\"']*)?(?:#[^\s<>\"']*)?",
-                                        detection_text, re.IGNORECASE)
-                                    detected_link = detected_link_match.group(0)[:180] if detected_link_match else "Link detected in message"
+                                    reason = abuse_reason
                                     ModerationEngine.log_event(thread_id, sender_username, "WARNING", reason)
-
-                                    warn_heading = (
-                                        "⚠️ **𝗔𝗕𝗨𝗦𝗜𝗡𝗚 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!** ⚠️\n\n" if abuse_reason else
-                                        ("🎬🔗 **𝗜𝗡𝗦𝗧𝗔𝗚𝗥𝗔𝗠 𝗥𝗘𝗘𝗟 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!** 🔗🎬\n\n" if link_type == "Instagram Reel Link" else "⚠️🚨 **𝗚𝗖 𝗦𝗔𝗙𝗘𝗧𝗬 𝗔𝗟𝗘𝗥𝗧!** 🚨⚠️\n\n")
-                                    )
                                     warn_card = (
-                                        warn_heading
+                                        "⚠️ **𝗔𝗕𝗨𝗦𝗜𝗡𝗚 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!** ⚠️\n\n"
                                         + f"👤 𝗢𝗙𝗙𝗘𝗡𝗗𝗘𝗥 ➜ {fix_mention(sender_username)}\n"
                                         + f"🆔 𝗨𝗦𝗘𝗥 𝗜𝗗 ➜ {sender_id or 'Unavailable'}\n"
-                                        + (f"🔗 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗 𝗟𝗜𝗡𝗞 ➜ {detected_link}\n" if link_violation else "")
-                                        + f"🚫 𝗥𝗘𝗔𝗦𝗢𝗡   ➜ {reason}\n"
+                                        + f"🚫 𝗥𝗘𝗔𝗦𝗢𝗡 ➜ {reason}\n"
                                         + f"⚠️ 𝗪𝗔𝗥𝗡𝗜𝗡𝗚𝗦 ➜ {warns}/2\n"
                                         + f"📉 𝗧𝗥𝗨𝗦𝗧 𝗦𝗖𝗢𝗥𝗘 ➜ {trust}%\n\n"
                                         + f"📢 **𝗔𝗗𝗠𝗜𝗡 𝗔𝗟𝗘𝗥𝗧** ➜ {admin_mentions_tag}\n\n"
                                         + f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
                                     )
-                                    # Every detected link/abuse event gets a warning card, including repeats.
                                     safe_send_message(thread_id, warn_card)
                                     if warns >= 2 and not (is_dev or is_sender_admin):
                                         execute_kick(thread_id, sender_id, sender_username, f"Second Violation ({reason})")
                                     elif warns >= 2:
-                                        safe_send_message(thread_id, f"🚨 Repeat violation alert for {fix_mention(sender_username)}. Admin review required; no automatic removal for privileged accounts.")
+                                        safe_send_message(thread_id, f"🚨 Repeat abuse alert for {fix_mention(sender_username)}. Admin review required; no automatic removal for privileged accounts.")
                                     continue
 
                                 if LOCAL_AUTO_REPLIES and not command_prefix_present:
@@ -1520,16 +1403,19 @@ def start_bot():
                     is_first_run = False
 
                 except (LoginRequired, ChallengeRequired, BadPassword) as auth_error:
-                    print(f"[STOP] Instagram login/challenge required ({type(auth_error).__name__}).")
+                    write_auth_hold(type(auth_error).__name__)
+                    print(f"[AUTH HOLD] Instagram login/challenge required ({type(auth_error).__name__}); saved hold marker. No automatic relogin.")
                     return
                 except (PleaseWaitFewMinutes, ClientThrottledError) as limit_error:
-                    print(f"[STOP] Instagram rate limit ({type(limit_error).__name__}).")
+                    write_auth_hold(type(limit_error).__name__)
+                    print(f"[AUTH HOLD] Instagram rate limit ({type(limit_error).__name__}); saved hold marker to prevent repeated requests.")
                     return
                 except Exception as e:
                     LAST_POLL_ERROR = type(e).__name__
                     logging.exception("poll_loop_error")
                     if is_auth_rejection(e):
-                        print("[AUTH HOLD] Instagram rejected the current session (401/login/challenge). Stopping requests to prevent repeated login attempts. Update INSTAGRAM_SESSION_ID only after verifying the account session, then restart the service.")
+                        write_auth_hold(type(e).__name__ + ": " + str(e))
+                        print("[AUTH HOLD] Instagram rejected the current session (401/login/challenge). Hold marker saved; no automatic password fallback or repeated session login.")
                         logging.critical("auth_hold_entered; no automatic password fallback or repeated session login")
                         return
                     time.sleep(POLL_INTERVAL)
@@ -1537,12 +1423,17 @@ def start_bot():
                 time.sleep(POLL_INTERVAL)
 
         except (LoginRequired, ChallengeRequired, BadPassword) as auth_error:
+            write_auth_hold(type(auth_error).__name__)
+            print(f"[AUTH HOLD] Startup authentication failed ({type(auth_error).__name__}); hold marker saved.")
             return
         except (PleaseWaitFewMinutes, ClientThrottledError) as limit_error:
+            write_auth_hold(type(limit_error).__name__)
+            print(f"[AUTH HOLD] Startup rate limit ({type(limit_error).__name__}); hold marker saved.")
             return
         except Exception as e:
             if is_auth_rejection(e):
-                print("[AUTH HOLD] Instagram rejected the current session (401/login/challenge). Bot stopped instead of repeatedly reconnecting. Verify the account session and set a fresh INSTAGRAM_SESSION_ID before restarting.")
+                write_auth_hold(type(e).__name__ + ": " + str(e))
+                print("[AUTH HOLD] Instagram rejected the current session (401/login/challenge). Hold marker saved; bot stopped instead of repeatedly reconnecting.")
                 logging.critical("auth_hold_entered_during_connect; no automatic password fallback or repeated session login", exc_info=True)
                 return
             print(f"[!] Critical error: {type(e).__name__}: {e}")
