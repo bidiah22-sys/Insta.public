@@ -39,7 +39,7 @@ OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(1, min(6, int(os.getenv("POLL_INTERVAL", "2"))))  # Fast but bounded polling; avoid aggressive API loops
+POLL_INTERVAL = max(10, min(60, int(os.getenv("POLL_INTERVAL", "12"))))  # Fast but bounded polling; avoid aggressive API loops
 THREAD_SCAN_AMOUNT = max(20, min(100, int(os.getenv("THREAD_SCAN_AMOUNT", "40"))))
 TIMEZONE_NAME = os.getenv("TIMEZONE", "Asia/Kolkata")
 SEEN_MESSAGE_CACHE_LIMIT = 5000
@@ -58,6 +58,16 @@ LOCKDOWN_MODE = False
 USER_LAST_MESSAGE_TIME = {}
 ANTISPAM_ENABLED = True
 ANTISPAM_LIMIT = 3
+
+
+def is_auth_rejection(exc: BaseException) -> bool:
+    """Recognize an Instagram 401/session rejection without retrying login in a loop."""
+    message = f"{type(exc).__name__}: {exc}".casefold()
+    return any(marker in message for marker in (
+        "401 client error", "unauthorized for url", "login_required",
+        "login required", "checkpoint_required", "challenge_required",
+        "challenge required", "please log in", "session has expired",
+    ))
 
 
 def fix_mention(username: str) -> str:
@@ -1518,6 +1528,10 @@ def start_bot():
                 except Exception as e:
                     LAST_POLL_ERROR = type(e).__name__
                     logging.exception("poll_loop_error")
+                    if is_auth_rejection(e):
+                        print("[AUTH HOLD] Instagram rejected the current session (401/login/challenge). Stopping requests to prevent repeated login attempts. Update INSTAGRAM_SESSION_ID only after verifying the account session, then restart the service.")
+                        logging.critical("auth_hold_entered; no automatic password fallback or repeated session login")
+                        return
                     time.sleep(POLL_INTERVAL)
 
                 time.sleep(POLL_INTERVAL)
@@ -1527,8 +1541,13 @@ def start_bot():
         except (PleaseWaitFewMinutes, ClientThrottledError) as limit_error:
             return
         except Exception as e:
-            print(f"[!] Critical error: {e}")
-            time.sleep(5)
+            if is_auth_rejection(e):
+                print("[AUTH HOLD] Instagram rejected the current session (401/login/challenge). Bot stopped instead of repeatedly reconnecting. Verify the account session and set a fresh INSTAGRAM_SESSION_ID before restarting.")
+                logging.critical("auth_hold_entered_during_connect; no automatic password fallback or repeated session login", exc_info=True)
+                return
+            print(f"[!] Critical error: {type(e).__name__}: {e}")
+            logging.exception("critical_startup_error; retrying after backoff")
+            time.sleep(30)
 
 
 if __name__ == "__main__":
