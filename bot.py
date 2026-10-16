@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 𝗦𝗠𝗪🚩 𝗚𝗥𝗢𝗨𝗣 𝗖𝗛𝗔𝗧 𝗣𝗥𝗢𝗧𝗘𝗖𝗧𝗜𝗢𝗡 𝗕𝗢𝗧
-𝗦𝗠𝗪🚩 Complete Admin-Gated Build v8 — auth-safe recovery and link-crash isolation.
-Preserves the existing GC features, admin gate, cards and database. Adds defensive shared-link extraction, per-message exception isolation, and bounded backoff for repeated Instagram 403 failures; 401 authentication rejection now stops safely.
+𝗦𝗠𝗪🚩 Complete Admin-Gated Build v9 — auth-hold protection and link-crash isolation.
+Preserves the existing GC features, admin gate, cards and database. Adds defensive shared-link extraction, per-message exception isolation, and bounded backoff for repeated Instagram 403 failures; 401 authentication rejection enters a safe hold instead of exiting into a hosting restart loop.
 
 Important: client-side handling cannot override Instagram-side access decisions.
 Keep session credentials private and persistent.
@@ -54,7 +54,7 @@ OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(10, min(60, int(os.getenv("POLL_INTERVAL", "12"))))  # Fast but bounded polling; avoid aggressive API loops
+POLL_INTERVAL = max(1, min(6, int(os.getenv("POLL_INTERVAL", "2"))))  # Fast but bounded polling; avoid aggressive API loops
 THREAD_SCAN_AMOUNT = max(20, min(500, int(os.getenv("THREAD_SCAN_AMOUNT", "100"))))
 TIMEZONE_NAME = os.getenv("TIMEZONE", "Asia/Kolkata")
 SEEN_MESSAGE_CACHE_LIMIT = 5000
@@ -509,6 +509,23 @@ ABUSIVE_TERMS = [
     "stupid bastard", "fat bitch", "dirty bitch", "piece of shit", "fuck off", "go fuck yourself",
 ]
 
+# Optional extra moderation terms can be maintained in a separate UTF-8 text file:
+# one term/phrase per line; blank lines and lines beginning with # are ignored.
+# This avoids an enormous hard-coded list, keeps startup fast, and lets the owner curate
+# language-specific variants without editing the main bot source.
+ABUSE_WORDLIST_FILE = Path(os.getenv("ABUSE_WORDLIST_FILE", "abusive_terms.txt"))
+if ABUSE_WORDLIST_FILE.exists():
+    try:
+        with ABUSE_WORDLIST_FILE.open("r", encoding="utf-8-sig") as _wordlist_file:
+            _extra_abusive_terms = [
+                line.strip() for line in _wordlist_file
+                if line.strip() and not line.lstrip().startswith("#")
+            ]
+        ABUSIVE_TERMS = list(dict.fromkeys(ABUSIVE_TERMS + _extra_abusive_terms))
+        logging.info("custom_abuse_terms_loaded count=%s path=%s", len(_extra_abusive_terms), ABUSE_WORDLIST_FILE)
+    except Exception:
+        logging.exception("custom_abuse_wordlist_load_failed path=%s", ABUSE_WORDLIST_FILE)
+
 # Build patterns that allow punctuation/spacing between letters while requiring word boundaries.
 def _abuse_pattern(term: str) -> re.Pattern:
     words = [w for w in re.split(r"\s+", term.casefold().strip()) if w]
@@ -711,9 +728,11 @@ def start_bot():
                     # username/password login: repeated recovery attempts can provoke
                     # Instagram email challenges and further account restrictions.
                     # Keep session.json untouched and stop for a deliberate manual recovery.
-                    print("[STOP] Session ID login failed. Automatic password fallback is disabled.")
-                    print("[STOP] Check the Session ID privately, then restart only after it is verified.")
-                    raise SystemExit(2) from exc
+                    print("[AUTH HOLD] Session ID login failed. Automatic password fallback is disabled.")
+                    print("[AUTH HOLD] This process will remain alive without retrying login, to avoid Railway crash/restart loops.")
+                    print("[AUTH HOLD] Verify the Session ID privately. After fixing the hosting variable, manually restart the service.")
+                    while True:
+                        time.sleep(3600)
             elif has_credentials:
                 # No Session ID: reuse saved settings/device identifiers, then authenticate.
                 if SESSION_SETTINGS_FILE.exists():
@@ -1832,11 +1851,14 @@ def start_bot():
                     backoff_seconds, AUTH_FAILURE_COUNT, type(e).__name__
                 )
                 print(
-                    f"[STOP] Instagram returned 401 Unauthorized ({type(e).__name__}). "
-                    "Authentication was rejected. The bot is stopping to avoid repeated login attempts. "
-                    "Verify the Session ID privately before restarting; session.json was not deleted."
+                    f"[AUTH HOLD] Instagram returned 401 Unauthorized ({type(e).__name__}). "
+                    "Polling is paused and no login retry will be attempted. The process stays alive "
+                    "to avoid a hosting crash/restart loop. Verify the Session ID privately, then manually restart."
                 )
-                return
+                # Railway and similar hosts may restart an exited process automatically.
+                # Stay alive without API calls or repeated authentication attempts.
+                while True:
+                    time.sleep(3600)
             logging.exception("critical_connection_or_login_error")
             print(f"[!] Critical error: {type(e).__name__}: {e}")
             time.sleep(min(60, POLL_INTERVAL * 2))
