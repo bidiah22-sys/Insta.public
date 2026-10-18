@@ -39,7 +39,7 @@ OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(10, min(60, int(os.getenv("POLL_INTERVAL", "12"))))  # Fast but bounded polling; avoid aggressive API loops
+POLL_INTERVAL = max(20, min(90, int(os.getenv("POLL_INTERVAL", "25"))))  # Conservative polling to reduce repeated API pressure during quiet hours
 THREAD_SCAN_AMOUNT = max(20, min(100, int(os.getenv("THREAD_SCAN_AMOUNT", "40"))))
 TIMEZONE_NAME = os.getenv("TIMEZONE", "Asia/Kolkata")
 SEEN_MESSAGE_CACHE_LIMIT = 5000
@@ -93,6 +93,24 @@ def fix_mention(username: str) -> str:
         return ""
     clean_name = str(username).strip().lstrip("@")
     return f"@{clean_name}" if clean_name else ""
+
+
+_BOLD_SANS = str.maketrans(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
+    "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇𝟬𝟭𝟮𝟯𝟰𝟱𝟲𝟳𝟴𝟵"
+)
+
+def smw_display(value: object) -> str:
+    """Apply SMW-style bold Unicode to display text without changing stored IDs."""
+    return str(value if value is not None else "").translate(_BOLD_SANS)
+
+
+def format_uptime(seconds: float) -> str:
+    total = max(0, int(seconds))
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, secs = divmod(rem, 60)
+    return f"{days}d {hours}h {minutes}m {secs}s"
 
 
 def get_admin_mentions_str(users: list, gc_admins: list) -> str:
@@ -553,7 +571,7 @@ def start_bot():
             print("║       STATUS: CONNECTED              ║")
             print("║   Group scan loop: STARTING          ║")
             print("╚══════════════════════════════════════╝\n")
-            print(f"[+] BOT @{BOT_USERNAME} logged in; polling every {POLL_INTERVAL}s; scanning up to {THREAD_SCAN_AMOUNT} recent threads per poll.")
+            print(f"[+] BOT @{BOT_USERNAME} logged in; polling every {POLL_INTERVAL}s; scanning up to {THREAD_SCAN_AMOUNT} recent threads per poll (conservative interval for quieter hours).")
 
             seen_message_ids = set()
             seen_message_order = deque()
@@ -1086,7 +1104,7 @@ def start_bot():
                                         else:
                                             cmd_name = parts[1].strip().lstrip("!").casefold()
                                             reply_text = parts[2].split("|", 1)[1].strip()
-                                            if not re.fullmatch(r"[a-z0-9_]{2,32}", cmd_name) or cmd_name in {"help", "panel", "status", "analytics", "rules", "addcmd", "editcmd", "delcmd", "cmds", "clearuser", "resetuser", "unrestrict", "gc", "gcanalytics", "gcs", "gcuser", "session", "safe_mode", "logs", "backup", "lockdown", "unlock", "godmode", "target", "shadowban", "nuke", "resetwarn", "unwarn", "antispam", "report", "inactive", "tagall", "active", "members", "admins", "dp", "profile", "user", "stats", "botinfo"}:
+                                            if not re.fullmatch(r"[a-z0-9_]{2,32}", cmd_name) or cmd_name in {"help", "panel", "status", "analytics", "rules", "addcmd", "editcmd", "delcmd", "cmds", "clearuser", "resetuser", "unrestrict", "gc", "gcanalytics", "gcs", "gcuser", "session", "safe_mode", "logs", "backup", "lockdown", "unlock", "godmode", "target", "shadowban", "nuke", "resetwarn", "unwarn", "antispam", "report", "inactive", "tagall", "active", "members", "admins", "dp", "profile", "user", "stats", "botinfo", "uptime"}:
                                                 safe_send_message(thread_id, "❌ Invalid or reserved command name. Use 2-32 letters, digits, or underscores.")
                                             elif not reply_text:
                                                 safe_send_message(thread_id, "❌ Reply text cannot be empty.")
@@ -1367,13 +1385,13 @@ def start_bot():
 
                                                 profile_card = (
                                                     f"👤✨ **𝗨𝗦𝗘𝗥 𝗣𝗥𝗢𝗙𝗜𝗟𝗘 𝗗𝗘𝗧𝗔𝗜𝗟𝗦** ✨👤\n\n"
-                                                    f"📌 **𝗡𝗮𝗺𝗲** ➜ {u_info.full_name or 'Not Provided'}\n"
-                                                    f"🆔 **𝗨𝘀𝗲𝗿𝗻𝗮𝗺𝗲** ➜ @{u_info.username}\n"
-                                                    f"🔢 **𝗨𝘀𝗲𝗿 𝗜𝗗** ➜ `{u_info.pk}`\n"
+                                                    f"📌 **𝗡𝗔𝗠𝗘** ➜ {smw_display(u_info.full_name or 'Not Provided')}\n"
+                                                    f"🆔 **𝗨𝗦𝗘𝗥𝗡𝗔𝗠𝗘** ➜ @{smw_display(u_info.username)}\n"
+                                                    f"🔢 **𝗨𝗦𝗘𝗥 𝗜𝗗** ➜ `{u_info.pk}`\n"
                                                     f"🗓️ **𝗙𝗶𝗿𝘀𝘁 𝗥𝗲𝗰𝗼𝗿𝗱𝗲𝗱** ➜ {tracked_since}\n"
-                                                    f"👥 **𝗙𝗼𝗹𝗹𝗼𝘄𝗲𝗿𝘀** ➜ {format_count(u_info.follower_count)}\n"
-                                                    f"🫂 **𝗙𝗼𝗹𝗹𝗼𝘄𝗶𝗻𝗴** ➜ {format_count(u_info.following_count)}\n"
-                                                    f"📸 **𝗧𝗼𝘁𝗮𝗹 𝗣𝗼𝘀𝘁𝘀** ➜ {u_info.media_count}\n"
+                                                    f"👥 **𝗙𝗢𝗟𝗟𝗢𝗪𝗘𝗥𝗦** ➜ {format_count(u_info.follower_count)}\n"
+                                                    f"🫂 **𝗙𝗢𝗟𝗟𝗢𝗪𝗜𝗡𝗚** ➜ {format_count(u_info.following_count)}\n"
+                                                    f"📸 **𝗧𝗢𝗧𝗔𝗟 𝗣𝗢𝗦𝗧𝗦** ➜ {u_info.media_count}\n"
                                                     f"🔗 **𝗕𝗶𝗼** ➜ {u_info.biography.replace('\n', ' ') if u_info.biography else 'No Bio'}\n"
                                                     f"🔒 **𝗣𝗿𝗶𝘃𝗮𝘁𝗲** ➜ {'Yes 🔒' if u_info.is_private else 'No 🟢'}\n\n"
                                                     f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
@@ -1387,6 +1405,17 @@ def start_bot():
                                         target_name = parts[1].lstrip("@") if len(parts) > 1 else sender_username
                                         stats_msg = ModerationEngine.get_user_stats(cl, target_name)
                                         safe_send_message(thread_id, stats_msg)
+                                        continue
+                                    elif command_token == "!uptime":
+                                        uptime_card = (
+                                            "⏱️✨ **𝗦𝗠𝗪 𝗕𝗢𝗧 𝗨𝗣𝗧𝗜𝗠𝗘** ✨⏱️\n\n"
+                                            f"🟢 **𝗣𝗥𝗢𝗖𝗘𝗦𝗦** ➜ Running for {format_uptime(time.time() - STARTED_AT)}\n"
+                                            f"🕒 **𝗟𝗔𝗦𝗧 𝗦𝗨𝗖𝗖𝗘𝗦𝗦𝗙𝗨𝗟 𝗣𝗢𝗟𝗟** ➜ {LAST_SUCCESSFUL_POLL or 'Waiting for first successful poll'}\n"
+                                            f"📡 **𝗣𝗢𝗟𝗟 𝗜𝗡𝗧𝗘𝗥𝗩𝗔𝗟** ➜ {POLL_INTERVAL}s\n"
+                                            f"⚠️ **𝗟𝗔𝗦𝗧 𝗘𝗥𝗥𝗢𝗥** ➜ {LAST_POLL_ERROR}\n\n"
+                                            "ℹ️ Process uptime does not guarantee the hosting service or Instagram session is active."
+                                        )
+                                        safe_send_message(thread_id, uptime_card)
                                         continue
                                     elif command_lower == "!botinfo":
                                         info_card = (
