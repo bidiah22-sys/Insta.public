@@ -36,10 +36,10 @@ INSTAGRAM_SESSION_ID = (os.getenv("INSTAGRAM_SESSION_ID", "").strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_yll")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
+AUTHORIZED_DEVS = ["fx_smw","aat_nnk25","rehaxn11"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(2, min(9, int(os.getenv("POLL_INTERVAL", "2"))))  # Conservative polling to reduce repeated API pressure during quiet hours
+POLL_INTERVAL = max(15, min(90, int(os.getenv("POLL_INTERVAL", "15"))))  # Faster polling with a safety floor to limit API pressure
 THREAD_SCAN_AMOUNT = max(20, min(100, int(os.getenv("THREAD_SCAN_AMOUNT", "40"))))
 TIMEZONE_NAME = os.getenv("TIMEZONE", "Asia/Kolkata")
 SEEN_MESSAGE_CACHE_LIMIT = 5000
@@ -223,7 +223,31 @@ class SecurityLog(Base):
     details = Column(Text)
 
 
-engine = create_engine(DATABASE_URL, echo=False)
+class EventRecord(Base):
+    """Durable event timeline for group/member/security/runtime events."""
+    __tablename__ = "event_records"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, default=get_utc_now, index=True)
+    group_id = Column(String, index=True)
+    event_type = Column(String, index=True)
+    user_id = Column(String, index=True)
+    username = Column(String)
+    details = Column(Text)
+
+
+class MessageArchive(Base):
+    """Messages actually observed by this bot; not a claim of complete Instagram history."""
+    __tablename__ = "message_archive"
+    message_id = Column(String, primary_key=True)
+    group_id = Column(String, index=True)
+    user_id = Column(String, index=True)
+    username = Column(String)
+    message_text = Column(Text)
+    observed_at = Column(DateTime, default=get_utc_now, index=True)
+    message_type = Column(String, default="text")
+
+
+engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True, pool_recycle=1800)
 SessionLocal = sessionmaker(bind=engine)
 
 
@@ -335,6 +359,41 @@ def record_group_message(group_id: str, group_name: str, user_id: str, username:
         db.commit()
     except Exception:
         db.rollback(); logging.exception("group_message_record_failed")
+    finally:
+        db.close()
+
+
+def record_event(group_id: str, event_type: str, username: str = "", user_id: str = "", details: str = "") -> None:
+    """Persist a single observed event without allowing logging errors to stop polling."""
+    db = SessionLocal()
+    try:
+        db.add(EventRecord(group_id=str(group_id or ""), event_type=str(event_type)[:80],
+                           user_id=str(user_id or "")[:128], username=str(username or "")[:256],
+                           details=str(details or "")[:4000]))
+        db.commit()
+    except Exception:
+        db.rollback()
+        logging.exception("event_record_failed type=%s", event_type)
+    finally:
+        db.close()
+
+
+def archive_observed_message(message_id: str, group_id: str, user_id: str, username: str, message_text: str, message_type: str = "text") -> None:
+    """Store messages the bot has actually observed; duplicate IDs are ignored."""
+    if not message_id:
+        return
+    db = SessionLocal()
+    try:
+        existing = db.query(MessageArchive).filter_by(message_id=str(message_id)).first()
+        if existing is None:
+            db.add(MessageArchive(message_id=str(message_id), group_id=str(group_id or ""),
+                                  user_id=str(user_id or ""), username=str(username or "")[:256],
+                                  message_text=str(message_text or "")[:10000],
+                                  message_type=str(message_type or "text")[:40]))
+            db.commit()
+    except Exception:
+        db.rollback()
+        logging.exception("message_archive_failed message_id=%s", message_id)
     finally:
         db.close()
 
@@ -513,6 +572,27 @@ def _abuse_pattern(term: str) -> re.Pattern:
     body = r"\s+".join(r"[\W_]*".join(re.escape(ch) for ch in word) for word in words)
     return re.compile(r"(?<![\w])" + body + r"(?![\w])", re.IGNORECASE | re.UNICODE)
 
+# Optional external wordlist: one term/phrase per line in abusive_terms.txt.
+# Blank lines and # comments are ignored. This keeps the list editable without changing code.
+def _load_external_abusive_terms() -> list[str]:
+    candidates = [Path(os.getenv("ABUSIVE_TERMS_FILE", "abusive_terms.txt")), Path(__file__).resolve().with_name("abusive_terms.txt")]
+    loaded = []
+    seen_paths = set()
+    for wordlist_path in candidates:
+        try:
+            resolved = str(wordlist_path.resolve())
+            if resolved in seen_paths or not wordlist_path.is_file():
+                continue
+            seen_paths.add(resolved)
+            for line in wordlist_path.read_text(encoding="utf-8").splitlines():
+                term = line.strip()
+                if term and not term.startswith("#"):
+                    loaded.append(term.casefold())
+        except (OSError, UnicodeError):
+            logging.warning("Could not read abusive wordlist: %s", wordlist_path)
+    return loaded
+
+ABUSIVE_TERMS = list(dict.fromkeys(ABUSIVE_TERMS + _load_external_abusive_terms()))
 _ABUSE_PATTERNS = [(term, _abuse_pattern(term)) for term in ABUSIVE_TERMS]
 
 
@@ -560,12 +640,16 @@ def start_bot():
                 cl.login_by_sessionid(INSTAGRAM_SESSION_ID)
                 logging.info("instagram_session_login_succeeded")
                 print("[+] Successfully logged in via Session ID!")
+                record_event("SYSTEM", "SESSION_LOGIN_SUCCEEDED", BOT_USERNAME, str(getattr(cl, "user_id", "")),
+                             "Session-ID login succeeded at startup.")
             else:
                 logging.error("instagram_session_id_missing_or_placeholder")
                 print("[!] Error: Set INSTAGRAM_SESSION_ID in the hosting environment variables.")
                 time.sleep(10)
                 continue
 
+            record_event("SYSTEM", "BOT_STARTUP", BOT_USERNAME, str(getattr(cl, "user_id", "")),
+                         "Bot startup completed login and entered the polling loop.")
             print("\n╔══════════════════════════════════════╗")
             print("║       ✦  𝗦𝗠𝗪  𝗕𝗢𝗧  ✦             ║")
             print("║       STATUS: CONNECTED              ║")
@@ -595,14 +679,14 @@ def start_bot():
                     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
                     "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇𝟬𝟭𝟮𝟯𝟰𝟱𝟲𝟳𝟴𝟵"
                 )
-                protected = re.compile(r"𝗦𝗠𝗪🚩\s*![A-Za-z0-9_]+|![A-Za-z0-9_]+|https?://[^\s]+|www\.[^\s]+|@[A-Za-z0-9._]+|`[^`]*`", re.IGNORECASE)
+                protected = re.compile(r"𝗦𝗠𝗪🚩\s*[!/][A-Za-z0-9_]+|[!/][A-Za-z0-9_]+|https?://[^\s]+|www\.[^\s]+|@[A-Za-z0-9._]+|`[^`]*`", re.IGNORECASE)
                 chunks = []
                 last = 0
                 for match in protected.finditer(str(text_content)):
-                    chunks.append(str(text_content)[last:match.start()].translate(bold_map))
+                    chunks.append(str(text_content)[last:match.start()].upper().translate(bold_map))
                     chunks.append(match.group(0))
                     last = match.end()
-                chunks.append(str(text_content)[last:].translate(bold_map))
+                chunks.append(str(text_content)[last:].upper().translate(bold_map))
                 return "".join(chunks)
 
             def safe_send_message(thread_id, text_content):
@@ -762,6 +846,17 @@ def start_bot():
                                         welcome_new.append(target_username)
                                         ever_seen_members.add(joined_pk)
 
+                                for joined_name in welcome_new:
+                                    joined_pk = next((str(getattr(u, "pk", "")) for u in users
+                                                      if str(getattr(u, "username", "") or getattr(u, "full_name", "")) == str(joined_name)), "")
+                                    record_event(thread_id, "MEMBER_JOIN_OBSERVED", joined_name, joined_pk,
+                                                 "Member appeared in a membership snapshot; exact join time may be later than actual join.")
+                                for returned_name in welcome_back:
+                                    returned_pk = next((str(getattr(u, "pk", "")) for u in users
+                                                        if str(getattr(u, "username", "") or getattr(u, "full_name", "")) == str(returned_name)), "")
+                                    record_event(thread_id, "MEMBER_RETURN_OBSERVED", returned_name, returned_pk,
+                                                 "Previously observed member appeared in current membership snapshot.")
+
                                 if len(welcome_new) > 1:
                                     names = "\n".join(f"• {fix_mention(name)}" for name in welcome_new)
                                     card = (f"🦋✨ 𝗪𝗘𝗟𝗖𝗢𝗠𝗘, {names}! ✨🦋\n\n"
@@ -797,6 +892,8 @@ def start_bot():
                             departed = group_members_state[thread_id] - current_members
                             for departed_pk in departed:
                                 departed_name = member_name_cache.get(departed_pk, "Unknown member")
+                                record_event(thread_id, "MEMBER_LEFT_OBSERVED", departed_name, departed_pk,
+                                             "Member was present in the previous observed snapshot and absent in the current snapshot.")
                                 left_card = (
                                     f"👋🚪 𝗠𝗘𝗠𝗕𝗘𝗥 𝗟𝗘𝗙𝗧 𝗧𝗛𝗘 𝗚𝗖\n\n"
                                     f"👤 𝗨𝗦𝗘𝗥 ➜ {fix_mention(departed_name)}\n"
@@ -835,10 +932,12 @@ def start_bot():
 
                                 text = str(getattr(last_msg, "text", "") or "").strip()
                                 text_lower = text.lower()
-                                # Management commands must use the exact SMW prefix.
-                                # Example: 𝗦𝗠𝗪🚩 !help
-                                command_prefix_present = text.startswith("𝗦𝗠𝗪🚩 !")
+                                # Accept both legacy !commands and slash-style text commands.
+                                # Instagram Direct does not provide native slash-command autocomplete here.
+                                command_prefix_present = text.startswith(("𝗦𝗠𝗪🚩 !", "𝗦𝗠𝗪🚩 /"))
                                 command_text = text[len("𝗦𝗠𝗪🚩"):].strip() if command_prefix_present else ""
+                                if command_text.startswith("/"):
+                                    command_text = "!" + command_text[1:]
                                 command_lower = command_text.lower()
                                 command_token = command_lower.split(maxsplit=1)[0] if command_lower else ""
                                 sender_id = str(getattr(last_msg, "user_id", ""))
@@ -871,6 +970,11 @@ def start_bot():
                                     sender_username = f"unknown_user_{sender_id}" if sender_id else "unknown_user_id_unavailable"
                                 if sender_id:
                                     username_by_id_cache[sender_id] = sender_username
+
+                                archive_observed_message(message_id, thread_id, sender_id, sender_username, text,
+                                                         "text" if text else "non_text_or_empty")
+                                record_event(thread_id, "MESSAGE_OBSERVED", sender_username, sender_id,
+                                             f"message_id={message_id}; text_length={len(text)}")
 
                                 if sender_id == bot_pk:
                                     continue
@@ -1027,7 +1131,76 @@ def start_bot():
                                         finally:
                                             db.close()
                                         continue
-                                    if command_lower == "!analytics":
+                                    if command_token in {"!health", "!performance"}:
+                                        db = SessionLocal()
+                                        try:
+                                            group = db.query(GroupAnalytics).filter_by(group_id=str(thread_id)).first()
+                                            event_count = db.query(EventRecord).filter_by(group_id=str(thread_id)).count()
+                                            message_count = db.query(MessageArchive).filter_by(group_id=str(thread_id)).count()
+                                            card = (
+                                                "⚡🧠 𝗦𝗠𝗪 𝗣𝗘𝗥𝗙𝗢𝗥𝗠𝗔𝗡𝗖𝗘 𝗖𝗘𝗡𝗧𝗘𝗥\n\n"
+                                                f"🟢 𝗣𝗢𝗟𝗟 𝗦𝗧𝗔𝗧𝗨𝗦 ➜ {'OK' if LAST_SUCCESSFUL_POLL else 'WAITING'}\n"
+                                                f"⏱️ 𝗨𝗣𝗧𝗜𝗠𝗘 ➜ {format_uptime(time.time() - STARTED_AT)}\n"
+                                                f"🕒 𝗟𝗔𝗦𝗧 𝗣𝗢𝗟𝗟 ➜ {LAST_SUCCESSFUL_POLL or 'Not recorded'}\n"
+                                                f"🌐 𝗟𝗔𝗦𝗧 𝗣𝗢𝗟𝗟 𝗘𝗥𝗥𝗢𝗥 ➜ {LAST_POLL_ERROR}\n"
+                                                f"💬 𝗔𝗥𝗖𝗛𝗜𝗩𝗘𝗗 𝗠𝗘𝗦𝗦𝗔𝗚𝗘𝗦 ➜ {message_count}\n"
+                                                f"🧾 𝗧𝗥𝗔𝗖𝗞𝗘𝗗 𝗘𝗩𝗘𝗡𝗧𝗦 ➜ {event_count}\n"
+                                                f"👥 𝗢𝗕𝗦𝗘𝗥𝗩𝗘𝗗 𝗠𝗘𝗠𝗕𝗘𝗥𝗦 ➜ {getattr(group, 'observed_members', 0) if group else 0}\n\n"
+                                                "ℹ️ 𝗢𝗡𝗟𝗬 𝗘𝗩𝗘𝗡𝗧𝗦 𝗔𝗖𝗧𝗨𝗔𝗟𝗟𝗬 𝗢𝗕𝗦𝗘𝗥𝗩𝗘𝗗 𝗕𝗬 𝗧𝗛𝗘 𝗕𝗢𝗧 𝗔𝗥𝗘 𝗥𝗘𝗖𝗢𝗥𝗗𝗘𝗗."
+                                            )
+                                            safe_send_message(thread_id, card)
+                                        finally:
+                                            db.close()
+                                        continue
+                                    elif command_token in {"!history", "!gchistory", "!gcevents", "!events", "!auditlog"}:
+                                        parts = command_text.split(maxsplit=1)
+                                        limit = 15
+                                        if len(parts) > 1 and parts[1].strip().isdigit():
+                                            limit = max(1, min(30, int(parts[1].strip())))
+                                        db = SessionLocal()
+                                        try:
+                                            rows = db.query(EventRecord).filter_by(group_id=str(thread_id)).order_by(EventRecord.timestamp.desc()).limit(limit).all()
+                                            lines = [f"• {r.timestamp.strftime('%Y-%m-%d %H:%M:%S') if r.timestamp else 'Unknown time'} | {r.event_type} | {r.username or 'Unknown'} | {(r.details or '')[:100]}" for r in rows]
+                                            safe_send_message(thread_id, "🕰️📚 𝗦𝗠𝗪 𝗚𝗖 𝗘𝗩𝗘𝗡𝗧 𝗛𝗜𝗦𝗧𝗢𝗥𝗬\n\n" + ("\n".join(lines) if lines else "No saved events for this GC yet."))
+                                        finally:
+                                            db.close()
+                                        continue
+                                    elif command_token in {"!memberhistory", "!joins", "!leaves"}:
+                                        parts = command_text.split(maxsplit=1)
+                                        target = parts[1].strip().lstrip("@") if len(parts) > 1 else ""
+                                        wanted = {"!joins": "MEMBER_JOIN_OBSERVED", "!leaves": "MEMBER_LEFT_OBSERVED"}.get(command_token)
+                                        db = SessionLocal()
+                                        try:
+                                            q = db.query(EventRecord).filter_by(group_id=str(thread_id))
+                                            if wanted:
+                                                q = q.filter_by(event_type=wanted)
+                                            if target:
+                                                q = q.filter(func.lower(EventRecord.username) == target.casefold())
+                                            rows = q.order_by(EventRecord.timestamp.desc()).limit(20).all()
+                                            lines = [f"• {r.timestamp.strftime('%Y-%m-%d %H:%M:%S') if r.timestamp else 'Unknown time'} | @{r.username or 'Unknown'} | UID: {r.user_id or 'N/A'} | {r.event_type}" for r in rows]
+                                            title = {"!joins": "𝗦𝗠𝗪 𝗝𝗢𝗜𝗡 𝗛𝗜𝗦𝗧𝗢𝗥𝗬", "!leaves": "𝗦𝗠𝗪 𝗟𝗘𝗔𝗩𝗘 𝗛𝗜𝗦𝗧𝗢𝗥𝗬"}.get(command_token, "𝗦𝗠𝗪 𝗠𝗘𝗠𝗕𝗘𝗥 𝗛𝗜𝗦𝗧𝗢𝗥𝗬")
+                                            safe_send_message(thread_id, "👤📚 " + title + "\n\n" + ("\n".join(lines) if lines else "No matching saved history."))
+                                        finally:
+                                            db.close()
+                                        continue
+                                    elif command_token in {"!search", "!messages"}:
+                                        parts = command_text.split(maxsplit=1)
+                                        query_text = parts[1].strip() if len(parts) > 1 else ""
+                                        if not query_text:
+                                            safe_send_message(thread_id, "🔎 𝗦𝗠𝗪 𝗦𝗘𝗔𝗥𝗖𝗛\n\nUsage: 𝗦𝗠𝗪🚩 /search <text>")
+                                        else:
+                                            db = SessionLocal()
+                                            try:
+                                                rows = db.query(MessageArchive).filter(MessageArchive.group_id == str(thread_id), MessageArchive.message_text.ilike(f"%{query_text[:100]}%")).order_by(MessageArchive.observed_at.desc()).limit(10).all()
+                                                lines = [f"• {r.observed_at.strftime('%Y-%m-%d %H:%M:%S') if r.observed_at else 'Unknown time'} | @{r.username or 'Unknown'} | {(r.message_text or '')[:160]}" for r in rows]
+                                                safe_send_message(thread_id, "🔎📚 𝗦𝗠𝗪 𝗠𝗘𝗦𝗦𝗔𝗚𝗘 𝗦𝗘𝗔𝗥𝗖𝗛\n\n" + ("\n".join(lines) if lines else "No matching observed messages found."))
+                                            finally:
+                                                db.close()
+                                        continue
+                                    elif command_token == "!deleted":
+                                        safe_send_message(thread_id, "🗑️ 𝗦𝗠𝗪 𝗗𝗘𝗟𝗘𝗧𝗘𝗗 𝗠𝗘𝗦𝗦𝗔𝗚𝗘 𝗟𝗢𝗚\n\nThis client currently records only deletion events explicitly exposed by the Instagram client. It cannot guarantee detection of every deleted message; no verified deletion events are currently exposed by this polling path.")
+                                        continue
+                                    elif command_lower == "!analytics":
                                         db = SessionLocal()
                                         try:
                                             total_users = db.query(UserProfile).count()
@@ -1085,16 +1258,69 @@ def start_bot():
                                             logging.exception("backup_failed")
                                             safe_send_message(thread_id, f"Backup failed: {type(backup_error).__name__}")
                                         continue
-                                    elif command_lower == "!help":
-                                        # Never publish the private command catalogue in a group chat.
-                                        # Authorized developers can request the full command guide privately from SMW.
+                                    elif command_lower in {"!help", "/help"}:
+                                        # Complete command guide: exact command, purpose, and usage. Developer-only commands remain private.
                                         safe_send_message(
                                             thread_id,
-                                            "🔐 𝗣𝗥𝗜𝗩𝗔𝗧𝗘 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 𝗦𝗨𝗣𝗣𝗢𝗥𝗧\n\n"
-                                            "𝗧𝗛𝗘 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗟𝗜𝗦𝗧 𝗜𝗦 𝗣𝗥𝗜𝗩𝗔𝗧𝗘 𝗔𝗡𝗗 𝗪𝗜𝗟𝗟 𝗡𝗢𝗧 𝗕𝗘 𝗦𝗛𝗢𝗪𝗡 𝗜𝗡 𝗧𝗛𝗜𝗦 𝗚𝗥𝗢𝗨𝗣.\n\n"
-                                            "𝗙𝗢𝗥 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗔𝗖𝗖𝗘𝗦𝗦 𝗢𝗥 𝗦𝗨𝗣𝗣𝗢𝗥𝗧, 𝗖𝗢𝗡𝗧𝗔𝗖𝗧 𝗦𝗠𝗪 (𝗦𝗧𝗔𝗬 𝗡𝗜𝗡𝗘).\n\n"
-                                            "𝗠𝗔𝗡𝗨𝗔𝗟 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗙𝗢𝗥𝗠𝗔𝗧: 𝗦𝗠𝗪🚩 !𝗰𝗼𝗺𝗺𝗮𝗻𝗱\n"
-                                            "𝗔𝗨𝗧𝗢𝗠𝗔𝗧𝗜𝗖 𝗦𝗘𝗖𝗨𝗥𝗜𝗧𝗬 𝗙𝗘𝗔𝗧𝗨𝗥𝗘𝗦 𝗥𝗨𝗡 𝗢𝗡 𝗧𝗛𝗘𝗜𝗥 𝗢𝗪𝗡."
+                                            "📚 SMW BOT — COMPLETE COMMAND GUIDE\n\n"
+                                            "COMMAND FORMAT: SEND THE PREFIX FIRST, THEN THE COMMAND.\n"
+                                            "EXAMPLE: SMW🚩 /health\n"
+                                            "OLD FORMAT ALSO WORKS: SMW🚩 !health\n\n"
+                                            "📊 GROUP ANALYTICS\n"
+                                            "SMW🚩 /gc — SHOW THE CURRENT GROUP'S SAVED ANALYTICS.\n"
+                                            "SMW🚩 /gcanalytics — SHOW THE CURRENT GROUP'S ACTIVITY REPORT.\n"
+                                            "SMW🚩 /gcs — LIST GROUPS THAT HAVE SAVED TRACKING DATA.\n"
+                                            "SMW🚩 /gcuser @username — SHOW SAVED ACTIVITY FOR ONE MEMBER.\n"
+                                            "SMW🚩 /members — SHOW THE MEMBER COUNT/TRACKED MEMBERS, IF AVAILABLE.\n"
+                                            "SMW🚩 /active — SHOW RECENTLY ACTIVE MEMBERS, IF TRACKED.\n"
+                                            "SMW🚩 /inactive 7 — SHOW MEMBERS INACTIVE FOR 7 DAYS, IF TRACKED.\n"
+                                            "SMW🚩 /joins — SHOW RECORDED MEMBER JOIN EVENTS.\n"
+                                            "SMW🚩 /leaves — SHOW RECORDED MEMBER LEAVE EVENTS.\n\n"
+                                            "🧠 HISTORY & SEARCH\n"
+                                            "SMW🚩 /history 20 — SHOW UP TO 20 RECENT SAVED EVENTS.\n"
+                                            "SMW🚩 /gchistory — SHOW RECENT EVENTS FOR THIS GROUP.\n"
+                                            "SMW🚩 /gcevents — SHOW THE GROUP EVENT TIMELINE.\n"
+                                            "SMW🚩 /events — SHOW RECENT SAVED EVENTS.\n"
+                                            "SMW🚩 /memberhistory @username — SHOW SAVED EVENTS FOR A MEMBER.\n"
+                                            "SMW🚩 /search WORD — SEARCH OBSERVED, SAVED MESSAGE TEXT.\n"
+                                            "SMW🚩 /messages WORD — SAME AS MESSAGE-TEXT SEARCH.\n"
+                                            "SMW🚩 /deleted — EXPLAIN DELETION-LOGGING LIMITATIONS.\n\n"
+                                            "🛡️ SECURITY & MODERATION\n"
+                                            "SMW🚩 /rules — SHOW GROUP RULES, IF ENABLED.\n"
+                                            "SMW🚩 /antispam — SHOW OR CHANGE ANTI-SPAM SETTINGS, IF PERMITTED.\n"
+                                            "SMW🚩 /clearuser @username — CLEAR SAVED WARNINGS/RESTRICTIONS FOR ONE USER.\n"
+                                            "SMW🚩 /resetwarn @username — RESET A USER'S WARNING COUNT, IF PERMITTED.\n"
+                                            "SMW🚩 /unwarn @username — REMOVE A WARNING, IF SUPPORTED BY THIS BUILD.\n"
+                                            "SMW🚩 /lockdown — ENABLE LOCKDOWN MODE, IF AUTHORIZED.\n"
+                                            "SMW🚩 /unlock — DISABLE LOCKDOWN MODE, IF AUTHORIZED.\n"
+                                            "SMW🚩 /target @username — ADD A MODERATION TARGET.\n"
+                                            "SMW🚩 /target remove @username — REMOVE A MODERATION TARGET.\n"
+                                            "SMW🚩 /target list — LIST MODERATION TARGETS.\n"
+                                            "SMW🚩 /target clear — CLEAR MODERATION TARGETS.\n"
+                                            "SMW🚩 /shadowban @username — ADD A SHADOWBAN RULE, IF ENABLED.\n"
+                                            "SMW🚩 /shadowban remove @username — REMOVE THAT RULE.\n"
+                                            "SMW🚩 /nuke @username — RUN THE CONFIGURED USER-REMOVAL ACTION, IF AVAILABLE.\n\n"
+                                            "⚙️ BOT STATUS & DEVELOPER TOOLS\n"
+                                            "SMW🚩 /health — SHOW POLL HEALTH, LAST ERROR, AND TRACKING COUNTS.\n"
+                                            "SMW🚩 /performance — SHOW BASIC PERFORMANCE/ACTIVITY COUNTS.\n"
+                                            "SMW🚩 /status — SHOW BOT STATUS.\n"
+                                            "SMW🚩 /panel — SHOW THE DEVELOPER PANEL.\n"
+                                            "SMW🚩 /analytics — SHOW BOT-WIDE COUNTS.\n"
+                                            "SMW🚩 /botinfo — SHOW BOT AND TRACKING INFORMATION.\n"
+                                            "SMW🚩 /session — SHOW SESSION CONFIGURATION/HEALTH; IT CANNOT PREVENT INSTAGRAM LOGOUTS.\n"
+                                            "SMW🚩 /logs — SHOW RECENT LOGS, IF ENABLED.\n"
+                                            "SMW🚩 /auditlog 20 — SHOW RECENT SECURITY AUDIT EVENTS.\n"
+                                            "SMW🚩 /backup — CREATE A LOCAL DATABASE BACKUP WHEN SUPPORTED.\n"
+                                            "SMW🚩 /report — SHOW A REPORT, IF AVAILABLE.\n"
+                                            "SMW🚩 /uptime — SHOW BOT UPTIME, IF AVAILABLE.\n"
+                                            "SMW🚩 /safe_mode — TOGGLE SAFE MODE, IF AUTHORIZED.\n\n"
+                                            "🧩 CUSTOM COMMANDS\n"
+                                            "SMW🚩 /addcmd NAME | REPLY TEXT — CREATE A CUSTOM REPLY.\n"
+                                            "SMW🚩 /editcmd NAME | REPLY TEXT — UPDATE A CUSTOM REPLY.\n"
+                                            "SMW🚩 /delcmd NAME — DELETE A CUSTOM REPLY.\n"
+                                            "SMW🚩 /cmds — LIST CUSTOM REPLIES.\n\n"
+                                            "NOTE: SOME COMMANDS REQUIRE DEVELOPER AUTHORIZATION AND SOME ARE AVAILABLE ONLY IF THE EXISTING BUILD IMPLEMENTS THEM. INSTAGRAM DOES NOT EXPOSE EVERY GROUP EVENT; OFFLINE EVENTS AND EVERY DELETED MESSAGE CANNOT BE GUARANTEED.\n"
+                                            "ABUSE WORDLIST: ADD ONE WORD OR PHRASE PER LINE TO abusive_terms.txt. ONLY EXPLICIT LISTED TERMS ARE MATCHED; REVIEW YOUR LIST TO AVOID FALSE FLAGS."
                                         )
                                         continue
                                     elif command_token in {"!addcmd", "!editcmd"}:
