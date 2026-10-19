@@ -39,7 +39,7 @@ OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw","aat_nnk25","rehaxn11"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(1, min(90, int(os.getenv("POLL_INTERVAL", "1"))))  # Faster polling with a safety floor to limit API pressure
+POLL_INTERVAL = max(1, min(5, int(os.getenv("POLL_INTERVAL", "1"))))  # Faster polling with a safety floor to limit API pressure
 THREAD_SCAN_AMOUNT = max(20, min(100, int(os.getenv("THREAD_SCAN_AMOUNT", "40"))))
 TIMEZONE_NAME = os.getenv("TIMEZONE", "Asia/Kolkata")
 SEEN_MESSAGE_CACHE_LIMIT = 5000
@@ -86,28 +86,6 @@ def is_auth_rejection(exc: BaseException) -> bool:
         "login required", "checkpoint_required", "challenge_required",
         "challenge required", "please log in", "session has expired",
     ))
-
-
-# Broad URL/link detection: domains, explicit schemes, www, common shorteners,
-# and obfuscated scheme punctuation. Detection is alert-only; it does not delete links.
-_URL_RE = re.compile(
-    r"(?ix)(?:"
-    r"\bhttps?\s*:\s*/\s*/[^\s<>]+|"
-    r"\bwww\s*\.\s*[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?:/[^\s<>]*)?|"
-    r"\b(?:instagram\.com|instagr\.am|bit\.ly|tinyurl\.com|t\.co|cutt\.ly|is\.gd|rb\.gy|rebrand\.ly|linktr\.ee|wa\.me|t\.me|telegram\.me|youtube\.com|youtu\.be|facebook\.com|fb\.watch|discord\.gg|discord\.com|forms\.gle|docs\.google\.com)\b(?:/[^\s<>]*)?|"
-    r"(?<![@\w])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|net|org|io|co|in|me|gg|ly|app|dev|site|xyz|info|biz|link|live|shop|store|online|tech|cloud|pro|top|click|vip|ru|uk|us|ai|edu|gov|tv|to|cc|pw|icu|fun|space|website|world|today|digital|agency|chat|social|club|life|work|email|news|blog|page|download|stream|video|media|solutions|services|support|systems|network|global|group|company|community)\b(?:/[^\s<>]*)?"
-    r")"
-)
-
-def extract_links(text: str) -> list[str]:
-    if not text:
-        return []
-    found = []
-    for match in _URL_RE.finditer(str(text)):
-        value = match.group(0).rstrip(".,!?;:)]}\"'\u2019")
-        if value and value not in found:
-            found.append(value)
-    return found[:8]
 
 
 def fix_mention(username: str) -> str:
@@ -1030,27 +1008,6 @@ def start_bot():
                                 if sender_id == bot_pk:
                                     continue
 
-                                # STRICT LINK DETECTION: alert immediately for any detected URL/domain.
-                                # This feature alerts and logs; it does not claim to delete the message.
-                                detected_links = extract_links(text)
-                                if detected_links:
-                                    link_preview = "\n".join(f"• {link[:220]}" for link in detected_links[:5])
-                                    link_time = datetime.now(ZoneInfo(TIMEZONE_NAME)).strftime("%d-%m-%Y • %I:%M:%S %p %Z")
-                                    link_card = (
-                                        "🔗🚨 𝗟𝗜𝗡𝗞 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗 — 𝗦𝗠𝗪 𝗚𝗖 𝗦𝗘𝗖𝗨𝗥𝗜𝗧𝗬\n\n"
-                                        + f"👤 𝗦𝗘𝗡𝗗𝗘𝗥 ➜ {fix_mention(sender_username)}\n"
-                                        + f"🆔 𝗨𝗦𝗘𝗥 𝗜𝗗 ➜ `{sender_id or 'Unavailable'}`\n"
-                                        + f"🏷️ 𝗚𝗖 ➜ {gc_name}\n"
-                                        + f"🔎 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗 𝗟𝗜𝗡𝗞(S)\n{link_preview}\n\n"
-                                        + f"🕒 𝗗𝗔𝗧𝗘 / 𝗧𝗜𝗠𝗘 ➜ {link_time}\n"
-                                        + "⚠️ 𝗔𝗖𝗧𝗜𝗢𝗡 ➜ Alert only; admin review recommended.\n\n"
-                                        + f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
-                                    )
-                                    safe_send_message(thread_id, link_card)
-                                    record_event(thread_id, "LINK_DETECTED", sender_username, sender_id,
-                                                 f"message_id={message_id}; links={'; '.join(detected_links)[:3000]}")
-                                    ModerationEngine.log_event(thread_id, sender_username, "LINK_DETECTED",
-                                                               f"message_id={message_id}; links={'; '.join(detected_links)[:3000]}")
 
                                 admin_ids_str = {str(x) for x in gc_admins}
                                 is_sender_admin = sender_id in admin_ids_str
