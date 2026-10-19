@@ -39,7 +39,10 @@ OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw","aat_nnk25","rehaxn11"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(1, min(9, int(os.getenv("POLL_INTERVAL", "1"))))  # Faster polling with a safety floor to limit API pressure
+POLL_INTERVAL = max(1, min(90, int(os.getenv("POLL_INTERVAL", "1"))))  # Conservative polling protects the account from API pressure.
+# Optional response pacing configuration (seconds). Set both to 0 for no intentional delay.
+REPLY_DELAY_MIN = max(0.0, min(10.0, float(os.getenv("REPLY_DELAY_MIN", "1"))))
+REPLY_DELAY_MAX = max(REPLY_DELAY_MIN, min(10.0, float(os.getenv("REPLY_DELAY_MAX", "2"))))
 THREAD_SCAN_AMOUNT = max(20, min(100, int(os.getenv("THREAD_SCAN_AMOUNT", "40"))))
 TIMEZONE_NAME = os.getenv("TIMEZONE", "Asia/Kolkata")
 SEEN_MESSAGE_CACHE_LIMIT = 5000
@@ -378,19 +381,6 @@ def record_event(group_id: str, event_type: str, username: str = "", user_id: st
         db.close()
 
 
-def message_already_archived(message_id: str) -> bool:
-    if not message_id:
-        return False
-    db = SessionLocal()
-    try:
-        return db.query(MessageArchive).filter_by(message_id=str(message_id)).first() is not None
-    except Exception:
-        logging.exception("message_archive_lookup_failed message_id=%s", message_id)
-        return False
-    finally:
-        db.close()
-
-
 def archive_observed_message(message_id: str, group_id: str, user_id: str, username: str, message_text: str, message_type: str = "text") -> None:
     """Store messages the bot has actually observed; duplicate IDs are ignored."""
     if not message_id:
@@ -668,7 +658,7 @@ def start_bot():
             print("║       STATUS: CONNECTED              ║")
             print("║   Group scan loop: STARTING          ║")
             print("╚══════════════════════════════════════╝\n")
-            print(f"[+] BOT @{BOT_USERNAME} logged in; polling every {POLL_INTERVAL}s; scanning up to {THREAD_SCAN_AMOUNT} recent threads per poll (conservative interval for quieter hours).")
+            print(f"[+] BOT @{BOT_USERNAME} logged in; polling every {POLL_INTERVAL}s; configured reply pacing {REPLY_DELAY_MIN:g}-{REPLY_DELAY_MAX:g}s; scanning up to {THREAD_SCAN_AMOUNT} recent threads per poll.")
 
             seen_message_ids = set()
             seen_message_order = deque()
@@ -841,15 +831,12 @@ def start_bot():
                                         continue
                                     is_spam, spam_reason, risk_score, _ = SpamAnalyzer.is_spam_profile(cl, target_username)
                                     if is_spam:
-                                        scan_time = datetime.now(ZoneInfo(TIMEZONE_NAME)).strftime("%d-%m-%Y • %I:%M:%S %p %Z")
                                         spam_card = (
-                                            f"🚨🛡 **𝗦𝗨𝗦𝗣𝗜𝗖𝗜𝗢𝗨𝗦 𝗠𝗘𝗠𝗕𝗘𝗥 𝗦𝗖𝗔𝗡**\n\n"
+                                            f"🚨🛡 **𝗦𝗣𝗔𝗠 𝗕𝗢𝗧 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!**\n\n"
                                             f"👤 𝗨𝗦𝗘𝗥 ➜ {fix_mention(target_username)}\n"
-                                            f"🆔 𝗨𝗦𝗘𝗥 𝗜𝗗 ➜ `{joined_pk}`\n"
                                             f"⚠️ 𝗥𝗜𝗦𝗞 𝗦𝗖𝗢𝗥𝗘 ➜ {risk_score}%\n"
                                             f"🛑 𝗥𝗘𝗔𝗦𝗢𝗡 ➜ {spam_reason}\n"
-                                            f"🕒 𝗦𝗖𝗔𝗡 𝗧𝗜𝗠𝗘 ➜ {scan_time}\n"
-                                            f"🚫 𝗔𝗖𝗧𝗜𝗢𝗡 ➜ Existing configured protection action attempted\n\n"
+                                            f"🚫 𝗔𝗖𝗧𝗜𝗢𝗡 ➜ Kick attempted for GC safety\n\n"
                                             f"📢 **𝗔𝗗𝗠𝗜𝗡 𝗔𝗟𝗘𝗥𝗧** ➜ {admin_mentions_tag}\n\n"
                                             f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
                                         )
@@ -910,13 +897,10 @@ def start_bot():
                                 departed_name = member_name_cache.get(departed_pk, "Unknown member")
                                 record_event(thread_id, "MEMBER_LEFT_OBSERVED", departed_name, departed_pk,
                                              "Member was present in the previous observed snapshot and absent in the current snapshot.")
-                                left_time = datetime.now(ZoneInfo(TIMEZONE_NAME)).strftime("%d-%m-%Y • %I:%M:%S %p %Z")
                                 left_card = (
                                     f"👋🚪 𝗠𝗘𝗠𝗕𝗘𝗥 𝗟𝗘𝗙𝗧 𝗧𝗛𝗘 𝗚𝗖\n\n"
                                     f"👤 𝗨𝗦𝗘𝗥 ➜ {fix_mention(departed_name)}\n"
-                                    f"🆔 𝗨𝗦𝗘𝗥 𝗜𝗗 ➜ `{departed_pk}`\n"
-                                    f"🕒 𝗗𝗔𝗧𝗘 / 𝗧𝗜𝗠𝗘 𝗢𝗕𝗦𝗘𝗥𝗩𝗘𝗗 ➜ {left_time}\n"
-                                    f"ℹ️ 𝗧𝗜𝗠𝗘 𝗜𝗦 𝗪𝗛𝗘𝗡 𝗕𝗢𝗧 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗 𝗧𝗛𝗘 𝗖𝗛𝗔𝗡𝗚𝗘.\n\n"
+                                    f"🆔 𝗨𝗦𝗘𝗥 𝗜𝗗 ➜ `{departed_pk}`\n\n"
                                     f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
                                 )
                                 safe_send_message(thread_id, left_card)
@@ -940,16 +924,6 @@ def start_bot():
 
                         for last_msg in reversed(messages):
                             message_id = str(getattr(last_msg, "id", "") or "")
-
-                            # Persistent idempotency: a message already archived by an earlier
-                            # process run must not trigger duplicate cards/actions after restart.
-                            if message_id and message_id not in seen_message_ids and message_already_archived(message_id):
-                                seen_message_ids.add(message_id)
-                                seen_message_order.append(message_id)
-                                if len(seen_message_order) > SEEN_MESSAGE_CACHE_LIMIT:
-                                    expired_id = seen_message_order.popleft()
-                                    seen_message_ids.discard(expired_id)
-                                continue
 
                             if message_id and message_id not in seen_message_ids:
                                 seen_message_ids.add(message_id)
@@ -1008,7 +982,6 @@ def start_bot():
                                 if sender_id == bot_pk:
                                     continue
 
-
                                 admin_ids_str = {str(x) for x in gc_admins}
                                 is_sender_admin = sender_id in admin_ids_str
                                 is_dev = sender_username.lstrip("@").casefold() in {d.lstrip("@").casefold() for d in AUTHORIZED_DEVS}
@@ -1035,7 +1008,10 @@ def start_bot():
                                     execute_kick(thread_id, sender_id, sender_username, "LOCKDOWN ACTIVE")
                                     continue
 
-                                if sender_username.lower() in TARGETED_USERS:
+                                # Hard safety guard: authorized developers are never affected by target rules.
+                                if (sender_username.lstrip("@").casefold() in {d.lstrip("@").casefold() for d in AUTHORIZED_DEVS}):
+                                    TARGETED_USERS.discard(sender_username.lstrip("@").casefold())
+                                elif sender_username.lstrip("@").casefold() in TARGETED_USERS:
                                     execute_kick(thread_id, sender_id, sender_username, "TARGET ELIMINATED")
                                     continue
 
@@ -1289,73 +1265,27 @@ def start_bot():
                                             safe_send_message(thread_id, f"Backup failed: {type(backup_error).__name__}")
                                         continue
                                     elif command_lower in {"!help", "/help"}:
-                                        # Keep the full developer command guide out of public GCs.
+                                        # Keep the complete command guide private: only an authorized developer receives it by DM.
+                                        if not is_dev:
+                                            safe_send_message(thread_id, "🔒 Developer help is private and available only to authorized developers.")
+                                            continue
                                         help_text = (
-                                            "📚 SMW BOT — COMPLETE COMMAND GUIDE\n\n"
-                                            "COMMAND FORMAT: SEND THE PREFIX FIRST, THEN THE COMMAND.\n"
-                                            "EXAMPLE: SMW🚩 /health\n"
-                                            "OLD FORMAT ALSO WORKS: SMW🚩 !health\n\n"
-                                            "📊 GROUP ANALYTICS\n"
-                                            "SMW🚩 /gc — SHOW THE CURRENT GROUP'S SAVED ANALYTICS.\n"
-                                            "SMW🚩 /gcanalytics — SHOW THE CURRENT GROUP'S ACTIVITY REPORT.\n"
-                                            "SMW🚩 /gcs — LIST GROUPS THAT HAVE SAVED TRACKING DATA.\n"
-                                            "SMW🚩 /gcuser @username — SHOW SAVED ACTIVITY FOR ONE MEMBER.\n"
-                                            "SMW🚩 /members — SHOW THE MEMBER COUNT/TRACKED MEMBERS, IF AVAILABLE.\n"
-                                            "SMW🚩 /active — SHOW RECENTLY ACTIVE MEMBERS, IF TRACKED.\n"
-                                            "SMW🚩 /inactive 7 — SHOW MEMBERS INACTIVE FOR 7 DAYS, IF TRACKED.\n"
-                                            "SMW🚩 /joins — SHOW RECORDED MEMBER JOIN EVENTS.\n"
-                                            "SMW🚩 /leaves — SHOW RECORDED MEMBER LEAVE EVENTS.\n\n"
-                                            "🧠 HISTORY & SEARCH\n"
-                                            "SMW🚩 /history 20 — SHOW UP TO 20 RECENT SAVED EVENTS.\n"
-                                            "SMW🚩 /gchistory — SHOW RECENT EVENTS FOR THIS GROUP.\n"
-                                            "SMW🚩 /gcevents — SHOW THE GROUP EVENT TIMELINE.\n"
-                                            "SMW🚩 /events — SHOW RECENT SAVED EVENTS.\n"
-                                            "SMW🚩 /memberhistory @username — SHOW SAVED EVENTS FOR A MEMBER.\n"
-                                            "SMW🚩 /search WORD — SEARCH OBSERVED, SAVED MESSAGE TEXT.\n"
-                                            "SMW🚩 /messages WORD — SAME AS MESSAGE-TEXT SEARCH.\n"
-                                            "SMW🚩 /deleted — EXPLAIN DELETION-LOGGING LIMITATIONS.\n\n"
-                                            "🛡️ SECURITY & MODERATION\n"
-                                            "SMW🚩 /rules — SHOW GROUP RULES, IF ENABLED.\n"
-                                            "SMW🚩 /antispam — SHOW OR CHANGE ANTI-SPAM SETTINGS, IF PERMITTED.\n"
-                                            "SMW🚩 /clearuser @username — CLEAR SAVED WARNINGS/RESTRICTIONS FOR ONE USER.\n"
-                                            "SMW🚩 /resetwarn @username — RESET A USER'S WARNING COUNT, IF PERMITTED.\n"
-                                            "SMW🚩 /unwarn @username — REMOVE A WARNING, IF SUPPORTED BY THIS BUILD.\n"
-                                            "SMW🚩 /lockdown — ENABLE LOCKDOWN MODE, IF AUTHORIZED.\n"
-                                            "SMW🚩 /unlock — DISABLE LOCKDOWN MODE, IF AUTHORIZED.\n"
-                                            "SMW🚩 /target @username — ADD A MODERATION TARGET.\n"
-                                            "SMW🚩 /target remove @username — REMOVE A MODERATION TARGET.\n"
-                                            "SMW🚩 /target list — LIST MODERATION TARGETS.\n"
-                                            "SMW🚩 /target clear — CLEAR MODERATION TARGETS.\n"
-                                            "SMW🚩 /shadowban @username — ADD A SHADOWBAN RULE, IF ENABLED.\n"
-                                            "SMW🚩 /shadowban remove @username — REMOVE THAT RULE.\n"
-                                            "SMW🚩 /nuke @username — RUN THE CONFIGURED USER-REMOVAL ACTION, IF AVAILABLE.\n\n"
-                                            "⚙️ BOT STATUS & DEVELOPER TOOLS\n"
-                                            "SMW🚩 /health — SHOW POLL HEALTH, LAST ERROR, AND TRACKING COUNTS.\n"
-                                            "SMW🚩 /performance — SHOW BASIC PERFORMANCE/ACTIVITY COUNTS.\n"
-                                            "SMW🚩 /status — SHOW BOT STATUS.\n"
-                                            "SMW🚩 /panel — SHOW THE DEVELOPER PANEL.\n"
-                                            "SMW🚩 /analytics — SHOW BOT-WIDE COUNTS.\n"
-                                            "SMW🚩 /botinfo — SHOW BOT AND TRACKING INFORMATION.\n"
-                                            "SMW🚩 /session — SHOW SESSION CONFIGURATION/HEALTH; IT CANNOT PREVENT INSTAGRAM LOGOUTS.\n"
-                                            "SMW🚩 /logs — SHOW RECENT LOGS, IF ENABLED.\n"
-                                            "SMW🚩 /auditlog 20 — SHOW RECENT SECURITY AUDIT EVENTS.\n"
-                                            "SMW🚩 /backup — CREATE A LOCAL DATABASE BACKUP WHEN SUPPORTED.\n"
-                                            "SMW🚩 /report — SHOW A REPORT, IF AVAILABLE.\n"
-                                            "SMW🚩 /uptime — SHOW BOT UPTIME, IF AVAILABLE.\n"
-                                            "SMW🚩 /safe_mode — TOGGLE SAFE MODE, IF AUTHORIZED.\n\n"
-                                            "🧩 CUSTOM COMMANDS\n"
-                                            "SMW🚩 /addcmd NAME | REPLY TEXT — CREATE A CUSTOM REPLY.\n"
-                                            "SMW🚩 /editcmd NAME | REPLY TEXT — UPDATE A CUSTOM REPLY.\n"
-                                            "SMW🚩 /delcmd NAME — DELETE A CUSTOM REPLY.\n"
-                                            "SMW🚩 /cmds — LIST CUSTOM REPLIES.\n\n"
-                                            "NOTE: SOME COMMANDS REQUIRE DEVELOPER AUTHORIZATION AND SOME ARE AVAILABLE ONLY IF THE EXISTING BUILD IMPLEMENTS THEM. INSTAGRAM DOES NOT EXPOSE EVERY GROUP EVENT; OFFLINE EVENTS AND EVERY DELETED MESSAGE CANNOT BE GUARANTEED.\n"
-                                            "ABUSE WORDLIST: ADD ONE WORD OR PHRASE PER LINE TO abusive_terms.txt. ONLY EXPLICIT LISTED TERMS ARE MATCHED; REVIEW YOUR LIST TO AVOID FALSE FLAGS."
+                                            "📚 𝗦𝗠𝗪 𝗕𝗢𝗧 — 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗚𝗨𝗜𝗗𝗘\n\n"
+                                            "📊 GROUP: !gc | !gcanalytics | !gcs | !gcuser @username | !members | !active | !inactive 7 | !joins | !leaves\n\n"
+                                            "🧾 HISTORY: !history 20 | !gchistory | !gcevents | !events | !memberhistory @username | !search WORD | !messages WORD\n\n"
+                                            "🛡️ MODERATION: !rules | !antispam | !clearuser @username | !resetwarn @username | !lockdown | !unlock | !target @username | !target remove @username | !target list | !target clear | !shadowban @username | !nuke @username\n\n"
+                                            "⚙️ DEVELOPER: !health | !performance | !status | !panel | !analytics | !botinfo | !session | !logs | !auditlog 20 | !backup | !report | !uptime | !safe_mode\n\n"
+                                            "🧩 CUSTOM: !addcmd NAME | REPLY TEXT | !editcmd NAME | REPLY TEXT | !delcmd NAME | !cmds\n\n"
+                                            "⏱️ TIMING: Set REPLY_DELAY_MIN and REPLY_DELAY_MAX in hosting environment variables (default 1–2 seconds). POLL_INTERVAL is separately limited to protect the Instagram session.\n"
+                                            "🔒 Authorized developers are excluded from target actions. Link detection is disabled. Instagram may limit session/API access; no code can guarantee zero errors or permanent uptime.\n\n"
+                                            "🤖 BOT ➜ " + fix_mention(BOT_USERNAME) + "\n👑 DEVELOPER ➜ 𝗦𝗠𝗪🚩"
                                         )
                                         try:
                                             cl.direct_send(help_text, user_ids=[int(sender_id)])
-                                        except Exception as help_dm_error:
-                                            logging.warning("private_help_dm_failed uid=%s error=%s", sender_id, type(help_dm_error).__name__)
-                                            # Do not post the full command guide or a second explanatory card into the GC.
+                                            logging.info("private_help_sent developer=%s", sender_username)
+                                        except Exception as dm_error:
+                                            logging.exception("private_help_send_failed developer=%s", sender_username)
+                                            safe_send_message(thread_id, "⚠️ I could not deliver the private help DM. Check the bot's DM access and developer account, then try again.")
                                         continue
                                     elif command_token in {"!addcmd", "!editcmd"}:
                                         parts = command_text.split(maxsplit=2)
@@ -1432,9 +1362,15 @@ def start_bot():
                                             safe_send_message(thread_id, f"🎯 Active targets: {targets}")
                                         elif len(parts) > 1:
                                             target = parts[1].lstrip("@").casefold()
-                                            TARGETED_USERS.add(target)
-                                            save_runtime_state()
-                                            safe_send_message(thread_id, f"🎯 Target registered: @{target}")
+                                            developer_names = {d.lstrip("@").casefold() for d in AUTHORIZED_DEVS}
+                                            if target in developer_names:
+                                                TARGETED_USERS.discard(target)
+                                                save_runtime_state()
+                                                safe_send_message(thread_id, "🛡️ Developer protection active. Authorized developers cannot be added to the target list.")
+                                            else:
+                                                TARGETED_USERS.add(target)
+                                                save_runtime_state()
+                                                safe_send_message(thread_id, f"🎯 Target registered: @{target}")
                                         else:
                                             safe_send_message(thread_id, "Usage: !target @username | !target remove @username | !target clear | !target list")
                                         continue
@@ -1686,7 +1622,7 @@ def start_bot():
                                         safe_send_message(thread_id, info_card)
                                         continue
                                     elif command_token.startswith("!"):
-                                        safe_send_message(thread_id, f"❓ Unknown command: {command_token}\nOpen the bot DM and send 𝗦𝗠𝗪🚩 !help for the private command guide.")
+                                        safe_send_message(thread_id, f"❓ Unknown command: {command_token}\nUse 𝗦𝗠𝗪🚩 !help to see the available commands.")
                                         continue
 
                     is_first_run = False
