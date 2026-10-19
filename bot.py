@@ -39,7 +39,7 @@ OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw","aat_nnk25","rehaxn11"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(2, min(90, int(os.getenv("POLL_INTERVAL", "1"))))  # Faster polling with a safety floor to limit API pressure
+POLL_INTERVAL = max(1, min(90, int(os.getenv("POLL_INTERVAL", "1"))))  # Faster polling with a safety floor to limit API pressure
 THREAD_SCAN_AMOUNT = max(20, min(100, int(os.getenv("THREAD_SCAN_AMOUNT", "40"))))
 TIMEZONE_NAME = os.getenv("TIMEZONE", "Asia/Kolkata")
 SEEN_MESSAGE_CACHE_LIMIT = 5000
@@ -86,6 +86,28 @@ def is_auth_rejection(exc: BaseException) -> bool:
         "login required", "checkpoint_required", "challenge_required",
         "challenge required", "please log in", "session has expired",
     ))
+
+
+# Broad URL/link detection: domains, explicit schemes, www, common shorteners,
+# and obfuscated scheme punctuation. Detection is alert-only; it does not delete links.
+_URL_RE = re.compile(
+    r"(?ix)(?:"
+    r"\bhttps?\s*:\s*/\s*/[^\s<>]+|"
+    r"\bwww\s*\.\s*[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?:/[^\s<>]*)?|"
+    r"\b(?:instagram\.com|instagr\.am|bit\.ly|tinyurl\.com|t\.co|cutt\.ly|is\.gd|rb\.gy|rebrand\.ly|linktr\.ee|wa\.me|t\.me|telegram\.me|youtube\.com|youtu\.be|facebook\.com|fb\.watch|discord\.gg|discord\.com|forms\.gle|docs\.google\.com)\b(?:/[^\s<>]*)?|"
+    r"(?<![@\w])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|net|org|io|co|in|me|gg|ly|app|dev|site|xyz|info|biz|link|live|shop|store|online|tech|cloud|pro|top|click|vip|ru|uk|us|ai|edu|gov|tv|to|cc|pw|icu|fun|space|website|world|today|digital|agency|chat|social|club|life|work|email|news|blog|page|download|stream|video|media|solutions|services|support|systems|network|global|group|company|community)\b(?:/[^\s<>]*)?"
+    r")"
+)
+
+def extract_links(text: str) -> list[str]:
+    if not text:
+        return []
+    found = []
+    for match in _URL_RE.finditer(str(text)):
+        value = match.group(0).rstrip(".,!?;:)]}\"'\u2019")
+        if value and value not in found:
+            found.append(value)
+    return found[:8]
 
 
 def fix_mention(username: str) -> str:
@@ -374,6 +396,19 @@ def record_event(group_id: str, event_type: str, username: str = "", user_id: st
     except Exception:
         db.rollback()
         logging.exception("event_record_failed type=%s", event_type)
+    finally:
+        db.close()
+
+
+def message_already_archived(message_id: str) -> bool:
+    if not message_id:
+        return False
+    db = SessionLocal()
+    try:
+        return db.query(MessageArchive).filter_by(message_id=str(message_id)).first() is not None
+    except Exception:
+        logging.exception("message_archive_lookup_failed message_id=%s", message_id)
+        return False
     finally:
         db.close()
 
@@ -828,12 +863,15 @@ def start_bot():
                                         continue
                                     is_spam, spam_reason, risk_score, _ = SpamAnalyzer.is_spam_profile(cl, target_username)
                                     if is_spam:
+                                        scan_time = datetime.now(ZoneInfo(TIMEZONE_NAME)).strftime("%d-%m-%Y • %I:%M:%S %p %Z")
                                         spam_card = (
-                                            f"🚨🛡 **𝗦𝗣𝗔𝗠 𝗕𝗢𝗧 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗!**\n\n"
+                                            f"🚨🛡 **𝗦𝗨𝗦𝗣𝗜𝗖𝗜𝗢𝗨𝗦 𝗠𝗘𝗠𝗕𝗘𝗥 𝗦𝗖𝗔𝗡**\n\n"
                                             f"👤 𝗨𝗦𝗘𝗥 ➜ {fix_mention(target_username)}\n"
+                                            f"🆔 𝗨𝗦𝗘𝗥 𝗜𝗗 ➜ `{joined_pk}`\n"
                                             f"⚠️ 𝗥𝗜𝗦𝗞 𝗦𝗖𝗢𝗥𝗘 ➜ {risk_score}%\n"
                                             f"🛑 𝗥𝗘𝗔𝗦𝗢𝗡 ➜ {spam_reason}\n"
-                                            f"🚫 𝗔𝗖𝗧𝗜𝗢𝗡 ➜ Kick attempted for GC safety\n\n"
+                                            f"🕒 𝗦𝗖𝗔𝗡 𝗧𝗜𝗠𝗘 ➜ {scan_time}\n"
+                                            f"🚫 𝗔𝗖𝗧𝗜𝗢𝗡 ➜ Existing configured protection action attempted\n\n"
                                             f"📢 **𝗔𝗗𝗠𝗜𝗡 𝗔𝗟𝗘𝗥𝗧** ➜ {admin_mentions_tag}\n\n"
                                             f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
                                         )
@@ -894,10 +932,13 @@ def start_bot():
                                 departed_name = member_name_cache.get(departed_pk, "Unknown member")
                                 record_event(thread_id, "MEMBER_LEFT_OBSERVED", departed_name, departed_pk,
                                              "Member was present in the previous observed snapshot and absent in the current snapshot.")
+                                left_time = datetime.now(ZoneInfo(TIMEZONE_NAME)).strftime("%d-%m-%Y • %I:%M:%S %p %Z")
                                 left_card = (
                                     f"👋🚪 𝗠𝗘𝗠𝗕𝗘𝗥 𝗟𝗘𝗙𝗧 𝗧𝗛𝗘 𝗚𝗖\n\n"
                                     f"👤 𝗨𝗦𝗘𝗥 ➜ {fix_mention(departed_name)}\n"
-                                    f"🆔 𝗨𝗦𝗘𝗥 𝗜𝗗 ➜ `{departed_pk}`\n\n"
+                                    f"🆔 𝗨𝗦𝗘𝗥 𝗜𝗗 ➜ `{departed_pk}`\n"
+                                    f"🕒 𝗗𝗔𝗧𝗘 / 𝗧𝗜𝗠𝗘 𝗢𝗕𝗦𝗘𝗥𝗩𝗘𝗗 ➜ {left_time}\n"
+                                    f"ℹ️ 𝗧𝗜𝗠𝗘 𝗜𝗦 𝗪𝗛𝗘𝗡 𝗕𝗢𝗧 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗 𝗧𝗛𝗘 𝗖𝗛𝗔𝗡𝗚𝗘.\n\n"
                                     f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
                                 )
                                 safe_send_message(thread_id, left_card)
@@ -921,6 +962,16 @@ def start_bot():
 
                         for last_msg in reversed(messages):
                             message_id = str(getattr(last_msg, "id", "") or "")
+
+                            # Persistent idempotency: a message already archived by an earlier
+                            # process run must not trigger duplicate cards/actions after restart.
+                            if message_id and message_id not in seen_message_ids and message_already_archived(message_id):
+                                seen_message_ids.add(message_id)
+                                seen_message_order.append(message_id)
+                                if len(seen_message_order) > SEEN_MESSAGE_CACHE_LIMIT:
+                                    expired_id = seen_message_order.popleft()
+                                    seen_message_ids.discard(expired_id)
+                                continue
 
                             if message_id and message_id not in seen_message_ids:
                                 seen_message_ids.add(message_id)
@@ -978,6 +1029,28 @@ def start_bot():
 
                                 if sender_id == bot_pk:
                                     continue
+
+                                # STRICT LINK DETECTION: alert immediately for any detected URL/domain.
+                                # This feature alerts and logs; it does not claim to delete the message.
+                                detected_links = extract_links(text)
+                                if detected_links:
+                                    link_preview = "\n".join(f"• {link[:220]}" for link in detected_links[:5])
+                                    link_time = datetime.now(ZoneInfo(TIMEZONE_NAME)).strftime("%d-%m-%Y • %I:%M:%S %p %Z")
+                                    link_card = (
+                                        "🔗🚨 𝗟𝗜𝗡𝗞 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗 — 𝗦𝗠𝗪 𝗚𝗖 𝗦𝗘𝗖𝗨𝗥𝗜𝗧𝗬\n\n"
+                                        + f"👤 𝗦𝗘𝗡𝗗𝗘𝗥 ➜ {fix_mention(sender_username)}\n"
+                                        + f"🆔 𝗨𝗦𝗘𝗥 𝗜𝗗 ➜ `{sender_id or 'Unavailable'}`\n"
+                                        + f"🏷️ 𝗚𝗖 ➜ {gc_name}\n"
+                                        + f"🔎 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗 𝗟𝗜𝗡𝗞(S)\n{link_preview}\n\n"
+                                        + f"🕒 𝗗𝗔𝗧𝗘 / 𝗧𝗜𝗠𝗘 ➜ {link_time}\n"
+                                        + "⚠️ 𝗔𝗖𝗧𝗜𝗢𝗡 ➜ Alert only; admin review recommended.\n\n"
+                                        + f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
+                                    )
+                                    safe_send_message(thread_id, link_card)
+                                    record_event(thread_id, "LINK_DETECTED", sender_username, sender_id,
+                                                 f"message_id={message_id}; links={'; '.join(detected_links)[:3000]}")
+                                    ModerationEngine.log_event(thread_id, sender_username, "LINK_DETECTED",
+                                                               f"message_id={message_id}; links={'; '.join(detected_links)[:3000]}")
 
                                 admin_ids_str = {str(x) for x in gc_admins}
                                 is_sender_admin = sender_id in admin_ids_str
@@ -1259,9 +1332,8 @@ def start_bot():
                                             safe_send_message(thread_id, f"Backup failed: {type(backup_error).__name__}")
                                         continue
                                     elif command_lower in {"!help", "/help"}:
-                                        # Complete command guide: exact command, purpose, and usage. Developer-only commands remain private.
-                                        safe_send_message(
-                                            thread_id,
+                                        # Keep the full developer command guide out of public GCs.
+                                        help_text = (
                                             "📚 SMW BOT — COMPLETE COMMAND GUIDE\n\n"
                                             "COMMAND FORMAT: SEND THE PREFIX FIRST, THEN THE COMMAND.\n"
                                             "EXAMPLE: SMW🚩 /health\n"
@@ -1322,6 +1394,11 @@ def start_bot():
                                             "NOTE: SOME COMMANDS REQUIRE DEVELOPER AUTHORIZATION AND SOME ARE AVAILABLE ONLY IF THE EXISTING BUILD IMPLEMENTS THEM. INSTAGRAM DOES NOT EXPOSE EVERY GROUP EVENT; OFFLINE EVENTS AND EVERY DELETED MESSAGE CANNOT BE GUARANTEED.\n"
                                             "ABUSE WORDLIST: ADD ONE WORD OR PHRASE PER LINE TO abusive_terms.txt. ONLY EXPLICIT LISTED TERMS ARE MATCHED; REVIEW YOUR LIST TO AVOID FALSE FLAGS."
                                         )
+                                        try:
+                                            cl.direct_send(help_text, user_ids=[int(sender_id)])
+                                        except Exception as help_dm_error:
+                                            logging.warning("private_help_dm_failed uid=%s error=%s", sender_id, type(help_dm_error).__name__)
+                                            # Do not post the full command guide or a second explanatory card into the GC.
                                         continue
                                     elif command_token in {"!addcmd", "!editcmd"}:
                                         parts = command_text.split(maxsplit=2)
@@ -1652,7 +1729,7 @@ def start_bot():
                                         safe_send_message(thread_id, info_card)
                                         continue
                                     elif command_token.startswith("!"):
-                                        safe_send_message(thread_id, f"❓ Unknown command: {command_token}\nUse 𝗦𝗠𝗪🚩 !help to see the available commands.")
+                                        safe_send_message(thread_id, f"❓ Unknown command: {command_token}\nOpen the bot DM and send 𝗦𝗠𝗪🚩 !help for the private command guide.")
                                         continue
 
                     is_first_run = False
