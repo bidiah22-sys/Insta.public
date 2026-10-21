@@ -36,10 +36,10 @@ INSTAGRAM_SESSION_ID = (os.getenv("INSTAGRAM_SESSION_ID", "").strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_yll")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-AUTHORIZED_DEVS = ["fx_smw","aat_nnk25","rehaxn11"]
+AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(1, min(90, int(os.getenv("POLL_INTERVAL", "1"))))  # Conservative polling protects the account from API pressure.
+POLL_INTERVAL = max(15, min(90, int(os.getenv("POLL_INTERVAL", "15"))))  # Conservative polling protects the account from API pressure.
 # Optional response pacing configuration (seconds). Set both to 0 for no intentional delay.
 REPLY_DELAY_MIN = max(0.0, min(10.0, float(os.getenv("REPLY_DELAY_MIN", "1"))))
 REPLY_DELAY_MAX = max(REPLY_DELAY_MIN, min(10.0, float(os.getenv("REPLY_DELAY_MAX", "2"))))
@@ -759,15 +759,6 @@ def start_bot():
                             continue
 
                         thread_id = thread.id
-                        if thread_id not in active_announced_threads:
-                            # Short GC-only startup notice; existing card/footer styling is preserved.
-                            active_card = "🎀 𝗦𝗠𝗪🚩 𝗕𝗢𝗧 𝗔𝗖𝗧𝗜𝗩𝗘 🎀"
-                            try:
-                                safe_send_message(thread_id, active_card)
-                                active_announced_threads.add(thread_id)
-                            except Exception as announce_error:
-                                print(f"[!] Startup card failed for thread {thread_id}: {announce_error}")
-
                         gc_admins = []
                         try:
                             if hasattr(thread, "admin_user_ids") and thread.admin_user_ids:
@@ -778,6 +769,26 @@ def start_bot():
                             gc_admins = []
 
                         bot_pk = str(cl.user_id)
+
+                        # STRICT GC ACCESS: process and store data only when the bot is
+                        # explicitly listed as an administrator of this group. If the API
+                        # does not expose a reliable admin list, fail closed for privacy.
+                        if not gc_admins or bot_pk not in {str(x) for x in gc_admins}:
+                            logging.info(
+                                "gc_skipped_bot_not_confirmed_admin thread=%s admin_list_available=%s",
+                                thread_id, bool(gc_admins)
+                            )
+                            continue
+
+                        if thread_id not in active_announced_threads:
+                            # Short GC-only startup notice; existing card/footer styling is preserved.
+                            active_card = "🎀 𝗦𝗠𝗪🚩 𝗕𝗢𝗧 𝗔𝗖𝗧𝗜𝗩𝗘 🎀"
+                            try:
+                                safe_send_message(thread_id, active_card)
+                                active_announced_threads.add(thread_id)
+                            except Exception as announce_error:
+                                print(f"[!] Startup card failed for thread {thread_id}: {announce_error}")
+
                         users = list(getattr(thread, "users", []) or [])
                         gc_name = (getattr(thread, "thread_title", None) or getattr(thread, "title", None) or getattr(thread, "name", None) or "Unknown GC")
                         record_group_snapshot(thread_id, str(gc_name), users)
@@ -1644,7 +1655,10 @@ def start_bot():
                         logging.critical("auth_hold_entered; no automatic password fallback or repeated session login")
                         return
                     time.sleep(POLL_INTERVAL)
+                    continue
 
+                # Keep polling even when every GC is quiet; do not implement an
+                # inactivity-based sleep mode that would miss the next message.
                 time.sleep(POLL_INTERVAL)
 
         except (LoginRequired, ChallengeRequired, BadPassword) as auth_error:
