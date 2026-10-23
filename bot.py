@@ -58,6 +58,29 @@ logging.basicConfig(filename="bot_runtime.log", level=logging.INFO, format="%(as
 # an Instagram session that has already been rejected. Clear it only after manual
 # account/session verification. For persistent behavior across redeploys, mount a volume.
 AUTH_HOLD_FILE = Path(os.getenv("AUTH_HOLD_FILE", "smw_auth_hold.json"))
+# Persist instagrapi device/session settings on a durable host volume. This does not
+# override Instagram revocations; it reduces unnecessary fresh-device/session setup.
+SESSION_SETTINGS_FILE = Path(os.getenv("SESSION_SETTINGS_FILE", "smw_instagram_settings.json"))
+
+
+def save_client_settings(client: Client, label: str) -> None:
+    try:
+        SESSION_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        client.dump_settings(str(SESSION_SETTINGS_FILE))
+        logging.info("instagram_client_settings_saved label=%s", label)
+    except Exception as settings_error:
+        logging.warning("instagram_client_settings_save_failed label=%s error=%s", label, type(settings_error).__name__)
+
+
+def load_client_settings(client: Client) -> bool:
+    try:
+        if SESSION_SETTINGS_FILE.is_file():
+            client.load_settings(str(SESSION_SETTINGS_FILE))
+            logging.info("instagram_client_settings_loaded")
+            return True
+    except Exception as settings_error:
+        logging.warning("instagram_client_settings_load_failed error=%s", type(settings_error).__name__)
+    return False
 
 def write_auth_hold(reason: str) -> None:
     try:
@@ -638,9 +661,13 @@ def start_bot():
                 "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/115.0.5790.166 "
                 "Mobile Safari/537.36 Instagram 290.0.0.13.76 Android"
             )
+            # Reuse saved device/session settings across restarts when a persistent
+            # volume is configured. The supplied Session ID remains the login source.
+            load_client_settings(cl)
 
             if INSTAGRAM_SESSION_ID and INSTAGRAM_SESSION_ID not in {"PASTE_YOUR_SESSION_ID_HERE", "PASTE_YOUR_NEW_SESSION_ID_HERE", "YOUR_SESSION_ID_HERE"}:
                 cl.login_by_sessionid(INSTAGRAM_SESSION_ID)
+                save_client_settings(cl, "session_id_login")
                 logging.info("instagram_session_login_succeeded")
                 print("[+] Successfully logged in via Session ID!")
                 record_event("SYSTEM", "SESSION_LOGIN_SUCCEEDED", BOT_USERNAME, str(getattr(cl, "user_id", "")),
@@ -745,6 +772,8 @@ def start_bot():
                 global TOTAL_SEEN_MESSAGES, LAST_SUCCESSFUL_POLL, LAST_POLL_ERROR
                 try:
                     threads = list(cl.direct_threads(amount=THREAD_SCAN_AMOUNT) or [])
+                    # Refresh the persisted client settings only after a successful API call.
+                    save_client_settings(cl, "successful_poll")
                     LAST_SUCCESSFUL_POLL = datetime.now(timezone.utc).isoformat()
                     LAST_POLL_ERROR = "None"
                     current_time_loop = time.time()
