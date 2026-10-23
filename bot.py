@@ -1118,6 +1118,46 @@ def start_bot():
                                     continue
 
                                 if is_dev and command_prefix_present and command_lower.startswith("!"):
+                                    # Call/music status cards are intentionally honest: the current
+                                    # instagrapi integration does not expose supported live group-call
+                                    # answer/join or audio-publishing controls. Never claim playback.
+                                    if command_token in {"!call", "!play", "!stop", "!musicstatus"}:
+                                        requested_song = command_text.split(maxsplit=1)[1].strip() if len(command_text.split(maxsplit=1)) > 1 else "Not specified"
+                                        if command_token == "!call":
+                                            card = (
+                                                "📞 🎀 𝗦𝗠𝗪 𝗖𝗔𝗟𝗟 𝗖𝗢𝗡𝗧𝗥𝗢𝗟 🎀\n\n"
+                                                "📡 𝗥𝗘𝗤𝗨𝗘𝗦𝗧 ➜ CALL JOIN / PICKUP\n"
+                                                "🔴 𝗦𝗧𝗔𝗧𝗨𝗦 ➜ NOT AVAILABLE\n\n"
+                                                "⚠️ 𝗧𝗘𝗖𝗛𝗡𝗜𝗖𝗔𝗟 𝗡𝗢𝗧𝗘\n"
+                                                "The current Instagram client does not provide a supported live group-call answer/join interface. No call was started.\n\n"
+                                                "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
+                                            )
+                                        elif command_token == "!play":
+                                            card = (
+                                                "🎵 🎀 𝗦𝗠𝗪 𝗠𝗨𝗦𝗜𝗖 𝗖𝗘𝗡𝗧𝗘𝗥 🎀\n\n"
+                                                f"🎧 𝗥𝗘𝗤𝗨𝗘𝗦𝗧𝗘𝗗 𝗧𝗥𝗔𝗖𝗞 ➜ {requested_song[:160]}\n"
+                                                "🔴 𝗣𝗟𝗔𝗬𝗕𝗔𝗖𝗞 𝗦𝗧𝗔𝗧𝗨𝗦 ➜ NOT STARTED\n\n"
+                                                "⚠️ 𝗧𝗘𝗖𝗛𝗡𝗜𝗖𝗔𝗟 𝗡𝗢𝗧𝗘\n"
+                                                "The current Instagram client does not provide live audio streaming into a group call. No music is playing.\n\n"
+                                                "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
+                                            )
+                                        elif command_token == "!stop":
+                                            card = (
+                                                "⏹️ 🎀 𝗦𝗠𝗪 𝗠𝗨𝗦𝗜𝗖 𝗖𝗘𝗡𝗧𝗘𝗥 🎀\n\n"
+                                                "ℹ️ 𝗣𝗟𝗔𝗬𝗕𝗔𝗖𝗞 𝗦𝗧𝗔𝗧𝗨𝗦 ➜ NO ACTIVE BOT PLAYBACK\n"
+                                                "Nothing was stopped because this integration cannot start live call playback.\n\n"
+                                                "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
+                                            )
+                                        else:
+                                            card = (
+                                                "📊 🎀 𝗦𝗠𝗪 𝗠𝗨𝗦𝗜𝗖 𝗦𝗧𝗔𝗧𝗨𝗦 🎀\n\n"
+                                                "🔴 𝗖𝗔𝗟𝗟 𝗜𝗡𝗧𝗘𝗚𝗥𝗔𝗧𝗜𝗢𝗡 ➜ NOT AVAILABLE\n"
+                                                "🔴 𝗟𝗜𝗩𝗘 𝗠𝗨𝗦𝗜𝗖 ➜ NOT PLAYING\n"
+                                                "ℹ️ 𝗥𝗘𝗔𝗦𝗢𝗡 ➜ Current Instagram client has no supported live-call audio control.\n\n"
+                                                "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
+                                            )
+                                        safe_send_message(thread_id, card)
+                                        continue
                                     if command_token in {"!gc", "!gcanalytics"}:
                                         db = SessionLocal()
                                         try:
@@ -1286,6 +1326,7 @@ def start_bot():
                                             "🧾 HISTORY: !history 20 | !gchistory | !gcevents | !events | !memberhistory @username | !search WORD | !messages WORD\n\n"
                                             "🛡️ MODERATION: !rules | !antispam | !clearuser @username | !resetwarn @username | !lockdown | !unlock | !target @username | !target remove @username | !target list | !target clear | !shadowban @username | !nuke @username\n\n"
                                             "⚙️ DEVELOPER: !health | !performance | !status | !panel | !analytics | !botinfo | !session | !logs | !auditlog 20 | !backup | !report | !uptime | !safe_mode\n\n"
+                                            "📞 CALL / MUSIC STATUS: !call | !play SONG NAME | !stop | !musicstatus (status cards only; live Instagram call/audio control is not supported by this client)\n\n"
                                             "🧩 CUSTOM: !addcmd NAME | REPLY TEXT | !editcmd NAME | REPLY TEXT | !delcmd NAME | !cmds\n\n"
                                             "⏱️ TIMING: Set REPLY_DELAY_MIN and REPLY_DELAY_MAX in hosting environment variables (default 1–2 seconds). POLL_INTERVAL is separately limited to protect the Instagram session.\n"
                                             "🔒 Authorized developers are excluded from target actions. Link detection is disabled. Instagram may limit session/API access; no code can guarantee zero errors or permanent uptime.\n\n"
@@ -1305,7 +1346,7 @@ def start_bot():
                                         else:
                                             cmd_name = parts[1].strip().lstrip("!").casefold()
                                             reply_text = parts[2].split("|", 1)[1].strip()
-                                            if not re.fullmatch(r"[a-z0-9_]{2,32}", cmd_name) or cmd_name in {"help", "panel", "status", "analytics", "rules", "addcmd", "editcmd", "delcmd", "cmds", "clearuser", "resetuser", "unrestrict", "gc", "gcanalytics", "gcs", "gcuser", "session", "safe_mode", "logs", "backup", "lockdown", "unlock", "godmode", "target", "shadowban", "nuke", "resetwarn", "unwarn", "antispam", "report", "inactive", "tagall", "active", "members", "admins", "dp", "profile", "user", "stats", "botinfo", "uptime"}:
+                                            if not re.fullmatch(r"[a-z0-9_]{2,32}", cmd_name) or cmd_name in {"help", "panel", "status", "analytics", "rules", "addcmd", "editcmd", "delcmd", "cmds", "clearuser", "resetuser", "unrestrict", "gc", "gcanalytics", "gcs", "gcuser", "session", "safe_mode", "logs", "backup", "lockdown", "unlock", "godmode", "target", "shadowban", "nuke", "resetwarn", "unwarn", "antispam", "report", "inactive", "tagall", "active", "members", "admins", "dp", "profile", "user", "stats", "botinfo", "uptime", "call", "play", "stop", "musicstatus"}:
                                                 safe_send_message(thread_id, "❌ Invalid or reserved command name. Use 2-32 letters, digits, or underscores.")
                                             elif not reply_text:
                                                 safe_send_message(thread_id, "❌ Reply text cannot be empty.")
