@@ -41,7 +41,7 @@ INSTAGRAM_SESSION_ID = (os.getenv("INSTAGRAM_SESSION_ID", "").strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_yll")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-AUTHORIZED_DEVS = ["vxf_subbu","aat_nnk","rehaxn11"]
+AUTHORIZED_DEVS = ["lz2r0","vxf_subbu","aat_nnk","rehaxn11"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 POLL_INTERVAL = max(1, min(90, int(os.getenv("POLL_INTERVAL", "1"))))  # Continuous polling; 3s default for faster replies while retaining a minimum safety interval.
