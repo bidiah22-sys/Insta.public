@@ -30,18 +30,14 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 load_dotenv()
 
 # -----------------------------------------------------------------
-# Set the Instagram session ID below only in a private local copy.
-# -----------------------------------------------------------------
-# Existing inline session variable copied from the user's previous bot file.
-# Hosting environment variables still take priority if configured.
-INLINE_SESSION_ID = ""
-INSTAGRAM_SESSION_ID = ("51627832873%3AnBmjA0bTRR2qx2%3A10%3AAYnzU1jYa8VbtMaFpE6jlYIjG4x5vBacIh2sEO2h9Q").strip()
-                        or os.getenv("IG_SESSION_ID", "51627832873%3AnBmjA0bTRR2qx2%3A10%3AAYnzU1jYa8VbtMaFpE6jlYIjG4x5vBacIh2sEO2h9Q").strip()
-                        or INLINE_SESSION_ID.strip())
+# Paste your Instagram Session ID between the quotes below.
+# Keep this file private; never share a file containing your session ID.
+INLINE_SESSION_ID = "PASTE_YOUR_SESSION_ID_HERE"
+INSTAGRAM_SESSION_ID = INLINE_SESSION_ID.strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_yll")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-AUTHORIZED_DEVS = ["lz2r0","vxf_subbu","aat_nnk","rehaxn11"]
+AUTHORIZED_DEVS = ["lz2r0" "vxf_subbu","aat_nnk","rehaxn11"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 POLL_INTERVAL = max(1, min(90, int(os.getenv("POLL_INTERVAL", "1"))))  # Continuous polling; 3s default for faster replies while retaining a minimum safety interval.
@@ -65,7 +61,7 @@ TIMEZONE_NAME = os.getenv("TIMEZONE", "Asia/Kolkata")
 # One-time birthday wish. Set BIRTHDAY_THREAD_ID to the exact Instagram GC thread ID.
 # The scheduler persists its sent marker so process restarts do not send duplicate wishes.
 BIRTHDAY_USERNAME = os.getenv("BIRTHDAY_USERNAME", "aat_nnk").strip().lstrip("@")
-BIRTHDAY_NAME = os.getenv("BIRTHDAY_NAME", "Veer").strip() or "Veer"
+BIRTHDAY_NAME = os.getenv("BIRTHDAY_NAME", "VEER✨️").strip() or "Veer"
 BIRTHDAY_DATE = os.getenv("BIRTHDAY_DATE", "2026-10-29").strip()
 BIRTHDAY_TIME = os.getenv("BIRTHDAY_TIME", "00:00").strip()
 BIRTHDAY_COUNTDOWN_MINUTES = max(1, min(60, int(os.getenv("BIRTHDAY_COUNTDOWN_MINUTES", "10"))))
@@ -1526,31 +1522,40 @@ def start_bot():
                                         except Exception:
                                             birthday_state = {}
                                         if subcommand == "start" and len(parts) <= 2:
-                                            # Immediate mode: detect current local time, count down 10..1, then wish.
-                                            # This is intentionally started by the command, not tied to midnight.
+                                            # Start a persisted 10-minute countdown in this GC.
+                                            # The polling loop sends one countdown card per minute without blocking scans.
                                             try:
+                                                now_local = datetime.now(ZoneInfo(TIMEZONE_NAME)).replace(second=0, microsecond=0)
+                                                target_dt = now_local + timedelta(minutes=10)
+                                                BIRTHDAY_THREAD_ID = str(thread_id)
+                                                BIRTHDAY_DATE = target_dt.strftime("%Y-%m-%d")
+                                                BIRTHDAY_TIME = target_dt.strftime("%H:%M")
+                                                BIRTHDAY_COUNTDOWN_START_AT = now_local.isoformat()
+                                                birthday_state["countdown_slots"] = {}
+                                                birthday_state.pop("sent_key", None)
+                                                birthday_state["command_config"] = {
+                                                    "enabled": True,
+                                                    "thread_id": BIRTHDAY_THREAD_ID,
+                                                    "date": BIRTHDAY_DATE,
+                                                    "time": BIRTHDAY_TIME,
+                                                    "countdown_start_at": BIRTHDAY_COUNTDOWN_START_AT,
+                                                    "username": BIRTHDAY_USERNAME,
+                                                    "name": BIRTHDAY_NAME,
+                                                }
+                                                BIRTHDAY_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                                                BIRTHDAY_STATE_FILE.write_text(json.dumps(birthday_state, ensure_ascii=False), encoding="utf-8")
                                                 safe_send_message(thread_id, (
-                                                    "🎀 𝗦𝗠𝗪 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 𝗪𝗜𝗦𝗛 𝗦𝗧𝗔𝗥𝗧𝗘𝗗 🚩\n\n"
+                                                    "🎀 𝗦𝗠𝗪 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 𝗖𝗢𝗨𝗡𝗧𝗗𝗢𝗪𝗡 𝗦𝗧𝗔𝗥𝗧𝗘𝗗 🚩\n\n"
                                                     f"📸 𝗜𝗚: @{BIRTHDAY_USERNAME}\n"
                                                     f"🎂 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 𝗕𝗢𝗬: {BIRTHDAY_NAME.upper()} 👑\n"
-                                                    f"🕒 𝗦𝗧𝗔𝗥𝗧𝗘𝗗 𝗔𝗧: {datetime.now(ZoneInfo(TIMEZONE_NAME)).strftime('%d %b %Y, %H:%M:%S')}\n\n"
-                                                    "🔥 𝗖𝗢𝗨𝗡𝗧𝗗𝗢𝗪𝗡 𝗕𝗘𝗚𝗜𝗡𝗦 𝗡𝗢𝗪..."
+                                                    f"🕒 𝗦𝗧𝗔𝗥𝗧: {now_local.strftime('%d %b %Y, %H:%M')} IST\n"
+                                                    f"🎉 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 𝗪𝗜𝗦𝗛: {target_dt.strftime('%H:%M')} IST\n\n"
+                                                    "⏳ One countdown message will be sent every minute for 10 minutes, then the birthday wish will be sent."
                                                 ))
-                                                for countdown_number in range(10, 0, -1):
-                                                    safe_send_message(thread_id, f"🎂🎉 𝗛𝗔𝗣𝗣𝗬 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 𝗖𝗢𝗨𝗡𝗧𝗗𝗢𝗪𝗡 ➜ {countdown_number} 🎉🎂\n👑 @{BIRTHDAY_USERNAME}")
-                                                    time.sleep(1)
-                                                safe_send_message(thread_id, (
-                                                    f"📸 𝗜𝗚: @{BIRTHDAY_USERNAME}\n\n"
-                                                    f"🎂🎉 𝗛𝗔𝗣𝗣𝗬 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 {BIRTHDAY_NAME.upper()} 🎉🎂\n\n"
-                                                    "👑❤️‍🔥 𝗧𝗢𝗗𝗔𝗬 𝗜𝗦 𝗬𝗢𝗨𝗥 𝗗𝗔𝗬, 𝗠𝗬 𝗕𝗥𝗢𝗧𝗛𝗘𝗥! 🫂💗\n\n"
-                                                    "🥹🎀 𝗠𝗮𝘆 𝘆𝗼𝘂𝗿 𝗻𝗲𝘄 𝘆𝗲𝗮𝗿 𝗯𝗿𝗶𝗻𝗴 𝘆𝗼𝘂 𝗵𝗮𝗽𝗽𝗶𝗻𝗲𝘀𝘀, 𝗹𝗼𝘃𝗲, 𝘀𝘂𝗰𝗰𝗲𝘀𝘀, 𝗮𝗻𝗱 𝗲𝘃𝗲𝗿𝘆𝘁𝗵𝗶𝗻𝗴 𝘆𝗼𝘂 𝗱𝗿𝗲𝗮𝗺 𝗼𝗳. 𝗞𝗲𝗲𝗽 𝘀𝗺𝗶𝗹𝗶𝗻𝗴, 𝗸𝗲𝗲𝗽 𝘀𝗵𝗶𝗻𝗶𝗻𝗴, 𝗮𝗻𝗱 𝗸𝗲𝗲𝗽 𝘄𝗶𝗻𝗻𝗶𝗻𝗴! ✨❤️\n\n"
-                                                    "🎉🎂 𝗢𝗡𝗖𝗘 𝗔𝗚𝗔𝗜𝗡, 𝗛𝗔𝗣𝗣𝗬 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬! 👑🔥\n"
-                                                    "👑 𝗦𝗣𝗘𝗖𝗜𝗔𝗟 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 𝗪𝗜𝗦𝗛𝗘𝗦 𝗕𝗬 𝗦𝗠𝗪🚩"
-                                                ))
-                                                logging.info("birthday_immediate_countdown_sent thread=%s", thread_id)
-                                            except Exception as immediate_birthday_error:
-                                                logging.exception("birthday_immediate_countdown_failed thread=%s error=%s", thread_id, type(immediate_birthday_error).__name__)
-                                                safe_send_message(thread_id, "⚠️ Birthday countdown failed while sending. Check Railway logs.")
+                                                logging.info("birthday_countdown_started thread=%s start=%s target=%s", thread_id, BIRTHDAY_COUNTDOWN_START_AT, target_dt.isoformat())
+                                            except Exception as birthday_start_error:
+                                                logging.exception("birthday_countdown_start_failed thread=%s error=%s", thread_id, type(birthday_start_error).__name__)
+                                                safe_send_message(thread_id, "⚠️ Could not start birthday countdown. Check Railway logs.")
                                             continue
                                         if subcommand == "start":
                                             # Scheduled form: !birthday start HH:MM [YYYY-MM-DD] [HH:MM]
