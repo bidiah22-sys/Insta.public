@@ -13,7 +13,7 @@ import concurrent.futures
 import queue
 import random
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from instagrapi import Client
@@ -44,7 +44,7 @@ OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["vxf_subbu","aat_nnk","rehaxn11"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(2, min(90, int(os.getenv("POLL_INTERVAL", "2"))))  # Fast polling; increase to 8-15s if Instagram throttles the session.
+POLL_INTERVAL = max(1, min(90, int(os.getenv("POLL_INTERVAL", "1"))))  # Continuous polling; 3s default for faster replies while retaining a minimum safety interval.
 # Optional response pacing configuration (seconds). Set both to 0 for no intentional delay.
 REPLY_DELAY_MIN = max(0.0, min(10.0, float(os.getenv("REPLY_DELAY_MIN", "0"))))
 REPLY_DELAY_MAX = max(REPLY_DELAY_MIN, min(10.0, float(os.getenv("REPLY_DELAY_MAX", "0"))))
@@ -62,6 +62,16 @@ AI_REQUEST_TIMEOUT = max(5, min(25, int(os.getenv("AI_REQUEST_TIMEOUT", "12"))))
 AI_MAX_CONCURRENT = max(2, min(12, int(os.getenv("AI_MAX_CONCURRENT", "8"))))
 AI_MAX_PENDING = max(20, min(300, int(os.getenv("AI_MAX_PENDING", "120"))))
 TIMEZONE_NAME = os.getenv("TIMEZONE", "Asia/Kolkata")
+# One-time birthday wish. Set BIRTHDAY_THREAD_ID to the exact Instagram GC thread ID.
+# The scheduler persists its sent marker so process restarts do not send duplicate wishes.
+BIRTHDAY_USERNAME = os.getenv("BIRTHDAY_USERNAME", "aat_nnk").strip().lstrip("@")
+BIRTHDAY_NAME = os.getenv("BIRTHDAY_NAME", "Veer").strip() or "Veer"
+BIRTHDAY_DATE = os.getenv("BIRTHDAY_DATE", "2026-10-29").strip()
+BIRTHDAY_TIME = os.getenv("BIRTHDAY_TIME", "00:00").strip()
+BIRTHDAY_COUNTDOWN_MINUTES = max(1, min(60, int(os.getenv("BIRTHDAY_COUNTDOWN_MINUTES", "10"))))
+BIRTHDAY_COUNTDOWN_INTERVAL_SECONDS = max(30, min(300, int(os.getenv("BIRTHDAY_COUNTDOWN_INTERVAL_SECONDS", "60"))))
+BIRTHDAY_THREAD_ID = os.getenv("BIRTHDAY_THREAD_ID", "").strip()
+BIRTHDAY_STATE_FILE = Path(os.getenv("BIRTHDAY_STATE_FILE", "smw_birthday_state.json"))
 SEEN_MESSAGE_CACHE_LIMIT = 5000
 LOCAL_AUTO_REPLIES = True
 DEVELOPER_DISPLAY = "𝗦𝗠𝗪🚩"
@@ -847,10 +857,10 @@ def start_bot():
                 chunks.append(str(text_content)[last:].upper().translate(bold_map))
                 return "".join(chunks)
 
-            def safe_send_message(thread_id, text_content):
+            def safe_send_message(thread_id, text_content, custom_footer=None):
                 # Keep all bot-facing English replies/cards in the consistent SMW bold font.
                 # Links, Instagram @mentions, and backtick-wrapped IDs are preserved verbatim.
-                footer = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
+                footer = custom_footer or "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
                 text_content = apply_smw_font(str(text_content))
                 footer_patterns = (
                     r"(?im)^.*(?:DEV(?:ELOPER)?\s*(?:➜|:|—|-)?\s*SMW|SMW\s+DEVELOPER|DEVELOPER\s*➜\s*SMW).*?$",
@@ -948,6 +958,7 @@ def start_bot():
                     current_hour = now.hour
                     current_minute = now.minute
                     current_date_str = now.strftime("%Y-%m-%d")
+                    current_hhmm = now.strftime("%H:%M")
 
                     for thread in threads:
                         if not getattr(thread, "is_group", False):
@@ -974,6 +985,91 @@ def start_bot():
                                 thread_id, bool(gc_admins)
                             )
                             continue
+
+                        # Birthday countdown: sends a board update at a controlled interval before midnight.
+                        # It requires the exact target GC thread ID and persists sent slots to avoid duplicates.
+                        if BIRTHDAY_THREAD_ID and str(thread_id) == BIRTHDAY_THREAD_ID:
+                            try:
+                                target_dt = datetime.strptime(
+                                    f"{BIRTHDAY_DATE} {BIRTHDAY_TIME}", "%Y-%m-%d %H:%M"
+                                ).replace(tzinfo=ZoneInfo(TIMEZONE_NAME))
+                                countdown_start = target_dt - timedelta(minutes=BIRTHDAY_COUNTDOWN_MINUTES)
+                                if countdown_start <= now < target_dt:
+                                    seconds_left = max(0, int((target_dt - now).total_seconds()))
+                                    countdown_slot = int((now - countdown_start).total_seconds() // BIRTHDAY_COUNTDOWN_INTERVAL_SECONDS)
+                                    state = {}
+                                    if BIRTHDAY_STATE_FILE.exists():
+                                        state = json.loads(BIRTHDAY_STATE_FILE.read_text(encoding="utf-8") or "{}")
+                                    countdown_key = f"{BIRTHDAY_DATE}:{BIRTHDAY_THREAD_ID}:{BIRTHDAY_USERNAME.lower()}"
+                                    sent_slots = state.get("countdown_slots", {})
+                                    if state.get("sent_key") != countdown_key and sent_slots.get(countdown_key) != countdown_slot:
+                                        minutes, seconds = divmod(seconds_left, 60)
+                                        countdown_board = (
+                                            f"🎀 𝗦𝗠𝗪 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 𝗖𝗢𝗨𝗡𝗧𝗗𝗢𝗪𝗡 🚩\n\n"
+                                            f"📸 𝗜𝗚: @{BIRTHDAY_USERNAME}\n"
+                                            f"🎂 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 𝗕𝗢𝗬: {BIRTHDAY_NAME.upper()} 👑\n\n"
+                                            f"⏳ 𝗧𝗜𝗠𝗘 𝗟𝗘𝗙𝗧: {minutes:02d}:{seconds:02d}\n\n"
+                                            "🔥 𝗧𝗛𝗘 𝗦𝗣𝗘𝗖𝗜𝗔𝗟 𝗠𝗢𝗠𝗘𝗡𝗧 𝗜𝗦 𝗖𝗢𝗠𝗜𝗡𝗚... 🫂❤️‍🔥\n"
+                                            "🎁 𝗚𝗘𝗧 𝗥𝗘𝗔𝗗𝗬 𝗧𝗢 𝗖𝗘𝗟𝗘𝗕𝗥𝗔𝗧𝗘! 🎉"
+                                        )
+                                        safe_send_message(
+                                            thread_id, countdown_board,
+                                            custom_footer="👑 𝗣𝗢𝗪𝗘𝗥𝗘𝗗 𝗕𝗬 𝗦𝗠𝗪🚩"
+                                        )
+                                        sent_slots[countdown_key] = countdown_slot
+                                        state["countdown_slots"] = sent_slots
+                                        BIRTHDAY_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                                        BIRTHDAY_STATE_FILE.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+                                        logging.info("birthday_countdown_update thread=%s slot=%s seconds_left=%s", thread_id, countdown_slot, seconds_left)
+                            except Exception as countdown_error:
+                                logging.exception("birthday_countdown_error thread=%s error=%s", thread_id, type(countdown_error).__name__)
+
+                        # Birthday wish: exact target GC only; send once at/after midnight on the configured date.
+                        # If the host restarts shortly after midnight, this catches up on the same date.
+                        if BIRTHDAY_THREAD_ID and str(thread_id) == BIRTHDAY_THREAD_ID:
+                            try:
+                                birthday_state = {}
+                                if BIRTHDAY_STATE_FILE.exists():
+                                    birthday_state = json.loads(BIRTHDAY_STATE_FILE.read_text(encoding="utf-8") or "{}")
+                                birthday_key = f"{BIRTHDAY_DATE}:{BIRTHDAY_THREAD_ID}:{BIRTHDAY_USERNAME.lower()}"
+                                due_now = (current_date_str == BIRTHDAY_DATE and current_hhmm >= BIRTHDAY_TIME)
+                                if due_now and birthday_state.get("sent_key") != birthday_key:
+                                    birthday_message = (
+                                        f"📸 𝗜𝗚: @{BIRTHDAY_USERNAME}\n\n"
+                                        f"🎂🎉 𝗛𝗔𝗣𝗣𝗬 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 {BIRTHDAY_NAME.upper()} 🎉🎂\n\n"
+                                        f"👑❤️‍🔥 𝗧𝗢𝗗𝗔𝗬 𝗜𝗦 𝗬𝗢𝗨𝗥 𝗗𝗔𝗬, 𝗠𝗬 𝗕𝗥𝗢𝗧𝗛𝗘𝗥! 🫂💗\n\n"
+                                        f"🥹🎀 𝗢𝗻𝗲 𝗺𝗼𝗿𝗲 𝘆𝗲𝗮𝗿 𝗼𝗳 𝘆𝗼𝘂𝗿 𝗹𝗶𝗳𝗲, 𝗼𝗻𝗲 𝗺𝗼𝗿𝗲 𝘆𝗲𝗮𝗿 𝗼𝗳 𝗻𝗲𝘄 𝗱𝗿𝗲𝗮𝗺𝘀, 𝗻𝗲𝘄 𝗵𝗼𝗽𝗲𝘀, 𝗮𝗻𝗱 𝗻𝗲𝘄 𝗯𝗲𝗴𝗶𝗻𝗻𝗶𝗻𝗴𝘀. ✨❤️\n\n"
+                                        f"🫶🏻💫 𝗜 𝗵𝗼𝗽𝗲 𝘁𝗵𝗶𝘀 𝘆𝗲𝗮𝗿 𝗯𝗿𝗶𝗻𝗴𝘀 𝘆𝗼𝘂 𝗲𝘃𝗲𝗿𝘆𝘁𝗵𝗶𝗻𝗴 𝘆𝗼𝘂 𝗵𝗮𝘃𝗲 𝗯𝗲𝗲𝗻 𝗽𝗿𝗮𝘆𝗶𝗻𝗴 𝗳𝗼𝗿. 𝗠𝗮𝘆 𝘆𝗼𝘂 𝗮𝗹𝘄𝗮𝘆𝘀 𝗳𝗶𝗻𝗱 𝗮 𝗿𝗲𝗮𝘀𝗼𝗻 𝘁𝗼 𝘀𝗺𝗶𝗹𝗲, 𝘁𝗵𝗲 𝗰𝗼𝘂𝗿𝗮𝗴𝗲 𝘁𝗼 𝗳𝗮𝗰𝗲 𝗲𝘃𝗲𝗿𝘆 𝗰𝗵𝗮𝗹𝗹𝗲𝗻𝗴𝗲, 𝗮𝗻𝗱 𝘁𝗵𝗲 𝘀𝘁𝗿𝗲𝗻𝗴𝘁𝗵 𝘁𝗼 𝗮𝗰𝗵𝗶𝗲𝘃𝗲 𝗮𝗹𝗹 𝘆𝗼𝘂𝗿 𝗱𝗿𝗲𝗮𝗺𝘀. 🥹🤍\n\n"
+                                        f"🫂❤️‍🔥 𝗟𝗶𝗳𝗲 𝗺𝗮𝘆 𝗻𝗼𝘁 𝗮𝗹𝘄𝗮𝘆𝘀 𝗯𝗲 𝗲𝗮𝘀𝘆, 𝗯𝘂𝘁 𝗜 𝗵𝗼𝗽𝗲 𝘆𝗼𝘂 𝗻𝗲𝘃𝗲𝗿 𝗹𝗼𝘀𝗲 𝘆𝗼𝘂𝗿 𝘀𝗺𝗶𝗹𝗲, 𝘆𝗼𝘂𝗿 𝗸𝗶𝗻𝗱𝗻𝗲𝘀𝘀, 𝗼𝗿 𝘁𝗵𝗲 𝗮𝗺𝗯𝗶𝘁𝗶𝗼𝗻 𝘁𝗵𝗮𝘁 𝗺𝗮𝗸𝗲𝘀 𝘆𝗼𝘂 𝘂𝗻𝗶𝗾𝘂𝗲. 𝗞𝗲𝗲𝗽 𝗴𝗿𝗼𝘄𝗶𝗻𝗴, 𝗸𝗲𝗲𝗽 𝘀𝗵𝗶𝗻𝗶𝗻𝗴, 𝗮𝗻𝗱 𝗸𝗲𝗲𝗽 𝗯𝗲𝗶𝗻𝗴 𝘁𝗵𝗲 𝗮𝗺𝗮𝘇𝗶𝗻𝗴 𝗽𝗲𝗿𝘀𝗼𝗻 𝘆𝗼𝘂 𝗮𝗿𝗲. 👑✨\n\n"
+                                        f"💗🎀 𝗧𝗵𝗮𝗻𝗸 𝘆𝗼𝘂 𝗳𝗼𝗿 𝗯𝗲𝗶𝗻𝗴 𝘆𝗼𝘂, {BIRTHDAY_NAME}. 𝗬𝗼𝘂 𝗱𝗲𝘀𝗲𝗿𝘃𝗲 𝗮𝗹𝗹 𝘁𝗵𝗲 𝗹𝗼𝘃𝗲, 𝗵𝗮𝗽𝗽𝗶𝗻𝗲𝘀𝘀, 𝗽𝗲𝗮𝗰𝗲, 𝗮𝗻𝗱 𝘀𝘂𝗰𝗰𝗲𝘀𝘀 𝘁𝗵𝗮𝘁 𝘁𝗵𝗶𝘀 𝘄𝗼𝗿𝗹𝗱 𝗵𝗮𝘀 𝘁𝗼 𝗼𝗳𝗳𝗲𝗿. 🥹❤️‍🩹\n\n"
+                                        f"🎉🎂 𝗢𝗡𝗖𝗘 𝗔𝗚𝗔𝗜𝗡, 𝗛𝗔𝗣𝗣𝗬 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬, {BIRTHDAY_NAME.upper()}! 👑🔥\n"
+                                        f"𝗞𝗘𝗘𝗣 𝗦𝗠𝗜𝗟𝗜𝗡𝗚, 𝗞𝗘𝗘𝗣 𝗦𝗛𝗜𝗡𝗜𝗡𝗚, 𝗔𝗡𝗗 𝗞𝗘𝗘𝗣 𝗪𝗜𝗡𝗡𝗜𝗡𝗚! 🫂❤️‍🔥"
+                                    )
+                                    # Split into safe-sized chunks at paragraph boundaries to avoid DM length failures.
+                                    birthday_paragraphs = birthday_message.split("\n\n")
+                                    birthday_parts = []
+                                    birthday_buffer = ""
+                                    for paragraph in birthday_paragraphs:
+                                        candidate = (birthday_buffer + "\n\n" + paragraph).strip()
+                                        if len(candidate) > 850 and birthday_buffer:
+                                            birthday_parts.append(birthday_buffer)
+                                            birthday_buffer = paragraph
+                                        else:
+                                            birthday_buffer = candidate
+                                    if birthday_buffer:
+                                        birthday_parts.append(birthday_buffer)
+                                    for birthday_part in birthday_parts:
+                                        safe_send_message(
+                                            thread_id, birthday_part,
+                                            custom_footer="👑 𝗦𝗣𝗘𝗖𝗜𝗔𝗟 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 𝗪𝗜𝗦𝗛𝗘𝗦 𝗕𝗬 𝗦𝗠𝗪🚩"
+                                        )
+                                        time.sleep(1)
+                                    birthday_state["sent_key"] = birthday_key
+                                    BIRTHDAY_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                                    BIRTHDAY_STATE_FILE.write_text(json.dumps(birthday_state, ensure_ascii=False), encoding="utf-8")
+                                    logging.info("birthday_wish_sent thread=%s date=%s username=%s", thread_id, BIRTHDAY_DATE, BIRTHDAY_USERNAME)
+                            except Exception as birthday_error:
+                                logging.exception("birthday_scheduler_error thread=%s error=%s", thread_id, type(birthday_error).__name__)
 
                         if thread_id not in active_announced_threads:
                             # Short GC-only startup notice; existing card/footer styling is preserved.
@@ -1907,9 +2003,11 @@ def start_bot():
                     print(f"[AUTH HOLD] Instagram login/challenge required ({type(auth_error).__name__}); saved hold marker. No automatic relogin.")
                     return
                 except (PleaseWaitFewMinutes, ClientThrottledError) as limit_error:
-                    write_auth_hold(type(limit_error).__name__)
-                    print(f"[AUTH HOLD] Instagram rate limit ({type(limit_error).__name__}); saved hold marker to prevent repeated requests.")
-                    return
+                    LAST_POLL_ERROR = type(limit_error).__name__
+                    logging.warning("instagram_rate_limit_cooldown error=%s cooldown_seconds=60", type(limit_error).__name__)
+                    print(f"[RATE LIMIT] Instagram asked the bot to slow down ({type(limit_error).__name__}); waiting 60 seconds before resuming polling.")
+                    time.sleep(60)
+                    continue
                 except Exception as e:
                     LAST_POLL_ERROR = type(e).__name__
                     logging.exception("poll_loop_error")
@@ -1930,9 +2028,10 @@ def start_bot():
             print(f"[AUTH HOLD] Startup authentication failed ({type(auth_error).__name__}); hold marker saved.")
             return
         except (PleaseWaitFewMinutes, ClientThrottledError) as limit_error:
-            write_auth_hold(type(limit_error).__name__)
-            print(f"[AUTH HOLD] Startup rate limit ({type(limit_error).__name__}); hold marker saved.")
-            return
+            print(f"[RATE LIMIT] Startup rate limit ({type(limit_error).__name__}); retrying startup after a 60-second cooldown.")
+            logging.warning("startup_rate_limit_cooldown error=%s", type(limit_error).__name__)
+            time.sleep(60)
+            continue
         except Exception as e:
             if is_auth_rejection(e):
                 write_auth_hold(type(e).__name__ + ": " + str(e))
