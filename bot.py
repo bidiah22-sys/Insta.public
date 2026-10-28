@@ -41,14 +41,14 @@ INSTAGRAM_SESSION_ID = (os.getenv("INSTAGRAM_SESSION_ID", "").strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_yll")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-AUTHORIZED_DEVS = ["lz2r0","vxf_subbu","aat_nnk","rehaxn11"]
+AUTHORIZED_DEVS = ["lz2ro","vxf_subbu","aat_nnk","rehaxn11"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 POLL_INTERVAL = max(1, min(90, int(os.getenv("POLL_INTERVAL", "1"))))  # Continuous polling; 3s default for faster replies while retaining a minimum safety interval.
 # Optional response pacing configuration (seconds). Set both to 0 for no intentional delay.
 REPLY_DELAY_MIN = max(0.0, min(10.0, float(os.getenv("REPLY_DELAY_MIN", "0"))))
 REPLY_DELAY_MAX = max(REPLY_DELAY_MIN, min(10.0, float(os.getenv("REPLY_DELAY_MAX", "0"))))
-THREAD_SCAN_AMOUNT = max(20, min(100, int(os.getenv("THREAD_SCAN_AMOUNT", "60"))))
+THREAD_SCAN_AMOUNT = max(10, min(100, int(os.getenv("THREAD_SCAN_AMOUNT", "5"))))
 # Optional AI conversational mode. Set OPENAI_API_KEY (or AI_API_KEY) in Railway Variables.
 AI_API_KEY = (os.getenv("AI_API_KEY", "").strip() or os.getenv("OPENAI_API_KEY", "").strip())
 AI_BASE_URL = os.getenv("AI_BASE_URL", "https://api.openai.com/v1/chat/completions").strip()
@@ -72,6 +72,21 @@ BIRTHDAY_COUNTDOWN_MINUTES = max(1, min(60, int(os.getenv("BIRTHDAY_COUNTDOWN_MI
 BIRTHDAY_COUNTDOWN_INTERVAL_SECONDS = max(30, min(300, int(os.getenv("BIRTHDAY_COUNTDOWN_INTERVAL_SECONDS", "60"))))
 BIRTHDAY_THREAD_ID = os.getenv("BIRTHDAY_THREAD_ID", "").strip()
 BIRTHDAY_STATE_FILE = Path(os.getenv("BIRTHDAY_STATE_FILE", "smw_birthday_state.json"))
+BIRTHDAY_COUNTDOWN_START_AT = ""
+# Restore command-configured birthday schedule after a process restart.
+try:
+    if BIRTHDAY_STATE_FILE.exists():
+        _birthday_saved_state = json.loads(BIRTHDAY_STATE_FILE.read_text(encoding="utf-8") or "{}")
+        _birthday_config = _birthday_saved_state.get("command_config", {})
+        if isinstance(_birthday_config, dict) and _birthday_config.get("enabled"):
+            BIRTHDAY_THREAD_ID = str(_birthday_config.get("thread_id", BIRTHDAY_THREAD_ID)).strip()
+            BIRTHDAY_DATE = str(_birthday_config.get("date", BIRTHDAY_DATE)).strip()
+            BIRTHDAY_TIME = str(_birthday_config.get("time", BIRTHDAY_TIME)).strip()
+            BIRTHDAY_USERNAME = str(_birthday_config.get("username", BIRTHDAY_USERNAME)).strip().lstrip("@")
+            BIRTHDAY_NAME = str(_birthday_config.get("name", BIRTHDAY_NAME)).strip() or "Veer"
+            BIRTHDAY_COUNTDOWN_START_AT = str(_birthday_config.get("countdown_start_at", "")).strip()
+except Exception as _birthday_restore_error:
+    logging.warning("birthday_config_restore_failed error=%s", type(_birthday_restore_error).__name__)
 SEEN_MESSAGE_CACHE_LIMIT = 5000
 LOCAL_AUTO_REPLIES = True
 DEVELOPER_DISPLAY = "𝗦𝗠𝗪🚩"
@@ -948,13 +963,18 @@ def start_bot():
                                     ai_context_by_thread.setdefault(str(result_thread), []).append({"role": "assistant", "content": reply_text})
                                     ai_context_by_thread[str(result_thread)] = ai_context_by_thread[str(result_thread)][-AI_MAX_CONTEXT_MESSAGES:]
                     threads = list(cl.direct_threads(amount=THREAD_SCAN_AMOUNT) or [])
+                    group_threads_found = sum(1 for item in threads if getattr(item, "is_group", False))
+                    logging.info(
+                        "poll_heartbeat status=active threads_fetched=%s group_threads=%s interval_seconds=%s",
+                        len(threads), group_threads_found, POLL_INTERVAL
+                    )
                     # Refresh the persisted client settings only after a successful API call.
                     save_client_settings(cl, "successful_poll")
                     LAST_SUCCESSFUL_POLL = datetime.now(timezone.utc).isoformat()
                     LAST_POLL_ERROR = "None"
                     current_time_loop = time.time()
 
-                    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+                    now = datetime.now(ZoneInfo(TIMEZONE_NAME))
                     current_hour = now.hour
                     current_minute = now.minute
                     current_date_str = now.strftime("%Y-%m-%d")
@@ -964,27 +984,56 @@ def start_bot():
                         if not getattr(thread, "is_group", False):
                             continue
 
-                        thread_id = thread.id
-                        gc_admins = []
-                        try:
-                            if hasattr(thread, "admin_user_ids") and thread.admin_user_ids:
-                                gc_admins = [str(uid) for uid in thread.admin_user_ids]
-                            elif hasattr(thread, "admin_users") and thread.admin_users:
-                                gc_admins = [str(getattr(admin, "pk", admin)) for admin in thread.admin_users]
-                        except Exception:
-                            gc_admins = []
+                        thread_id = str(getattr(thread, "id", "") or getattr(thread, "thread_id", ""))
+                        if not thread_id:
+                            logging.warning("gc_skipped_missing_thread_id")
+                            continue
 
-                        bot_pk = str(cl.user_id)
+                        def extract_admin_ids(thread_obj):
+                            """Read admin IDs from thread objects across instagrapi versions."""
+                            found = set()
+                            for attr in ("admin_user_ids", "admin_users", "admins", "thread_admins"):
+                                try:
+                                    values = getattr(thread_obj, attr, None) or []
+                                    if not isinstance(values, (list, tuple, set)):
+                                        values = [values]
+                                    for value in values:
+                                        candidate = value
+                                        for key in ("pk", "user_id", "id"):
+                                            nested = getattr(value, key, None)
+                                            if nested is not None:
+                                                candidate = nested
+                                                break
+                                        if candidate is not None:
+                                            found.add(str(candidate))
+                                except Exception:
+                                    continue
+                            return found
 
-                        # STRICT GC ACCESS: process and store data only when the bot is
-                        # explicitly listed as an administrator of this group. If the API
-                        # does not expose a reliable admin list, fail closed for privacy.
-                        if not gc_admins or bot_pk not in {str(x) for x in gc_admins}:
-                            logging.info(
-                                "gc_skipped_bot_not_confirmed_admin thread=%s admin_list_available=%s",
-                                thread_id, bool(gc_admins)
+                        gc_admins = extract_admin_ids(thread)
+                        bot_pk = str(getattr(cl, "user_id", ""))
+
+                        # Refresh abbreviated thread metadata before skipping an Admin GC.
+                        # The Admin-only access rule remains enabled.
+                        if not gc_admins or bot_pk not in gc_admins:
+                            try:
+                                refreshed_thread = cl.direct_thread(thread_id)
+                                refreshed_admins = extract_admin_ids(refreshed_thread)
+                                if refreshed_admins:
+                                    gc_admins = refreshed_admins
+                            except Exception as refresh_error:
+                                logging.debug(
+                                    "gc_admin_metadata_refresh_failed thread=%s error=%s",
+                                    thread_id, type(refresh_error).__name__
+                                )
+
+                        if not gc_admins or bot_pk not in gc_admins:
+                            logging.warning(
+                                "gc_skipped_bot_not_confirmed_admin thread=%s admin_list_available=%s bot_id_present=%s",
+                                thread_id, bool(gc_admins), bot_pk in gc_admins
                             )
                             continue
+                        logging.debug("gc_admin_verified thread=%s", thread_id)
 
                         # Birthday countdown: sends a board update at a controlled interval before midnight.
                         # It requires the exact target GC thread ID and persists sent slots to avoid duplicates.
@@ -993,7 +1042,12 @@ def start_bot():
                                 target_dt = datetime.strptime(
                                     f"{BIRTHDAY_DATE} {BIRTHDAY_TIME}", "%Y-%m-%d %H:%M"
                                 ).replace(tzinfo=ZoneInfo(TIMEZONE_NAME))
-                                countdown_start = target_dt - timedelta(minutes=BIRTHDAY_COUNTDOWN_MINUTES)
+                                if BIRTHDAY_COUNTDOWN_START_AT:
+                                    countdown_start = datetime.fromisoformat(BIRTHDAY_COUNTDOWN_START_AT)
+                                    if countdown_start.tzinfo is None:
+                                        countdown_start = countdown_start.replace(tzinfo=ZoneInfo(TIMEZONE_NAME))
+                                else:
+                                    countdown_start = target_dt - timedelta(minutes=BIRTHDAY_COUNTDOWN_MINUTES)
                                 if countdown_start <= now < target_dt:
                                     seconds_left = max(0, int((target_dt - now).total_seconds()))
                                     countdown_slot = int((now - countdown_start).total_seconds() // BIRTHDAY_COUNTDOWN_INTERVAL_SECONDS)
@@ -1436,6 +1490,74 @@ def start_bot():
                                     continue
 
                                 if is_dev and command_prefix_present and command_lower.startswith("!"):
+                                    if command_token == "!birthday":
+                                        parts = command_text.split()
+                                        subcommand = parts[1].lower() if len(parts) > 1 else "status"
+                                        birthday_state = {}
+                                        try:
+                                            if BIRTHDAY_STATE_FILE.exists():
+                                                birthday_state = json.loads(BIRTHDAY_STATE_FILE.read_text(encoding="utf-8") or "{}")
+                                        except Exception:
+                                            birthday_state = {}
+                                        if subcommand == "start":
+                                            # Simple form: !birthday start 23:50
+                                            # Full form:   !birthday start 23:50 2026-10-29 00:00
+                                            start_clock = parts[2] if len(parts) > 2 else "23:50"
+                                            date_arg = parts[3] if len(parts) > 3 else BIRTHDAY_DATE
+                                            target_clock = parts[4] if len(parts) > 4 else "00:00"
+                                            try:
+                                                datetime.strptime(start_clock, "%H:%M")
+                                                datetime.strptime(date_arg, "%Y-%m-%d")
+                                                datetime.strptime(target_clock, "%H:%M")
+                                                target_dt = datetime.strptime(f"{date_arg} {target_clock}", "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo(TIMEZONE_NAME))
+                                                countdown_start_dt = datetime.strptime(f"{date_arg} {start_clock}", "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo(TIMEZONE_NAME))
+                                                if countdown_start_dt >= target_dt:
+                                                    countdown_start_dt -= timedelta(days=1)
+                                                if target_dt <= datetime.now(ZoneInfo(TIMEZONE_NAME)):
+                                                    raise ValueError("birthday target must be in the future")
+                                                BIRTHDAY_THREAD_ID = str(thread_id)
+                                                BIRTHDAY_DATE = date_arg
+                                                BIRTHDAY_TIME = target_clock
+                                                BIRTHDAY_COUNTDOWN_START_AT = countdown_start_dt.isoformat()
+                                                birthday_state["command_config"] = {
+                                                    "enabled": True,
+                                                    "thread_id": BIRTHDAY_THREAD_ID,
+                                                    "date": BIRTHDAY_DATE,
+                                                    "time": BIRTHDAY_TIME,
+                                                    "countdown_start_at": BIRTHDAY_COUNTDOWN_START_AT,
+                                                    "username": BIRTHDAY_USERNAME,
+                                                    "name": BIRTHDAY_NAME,
+                                                }
+                                                BIRTHDAY_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                                                BIRTHDAY_STATE_FILE.write_text(json.dumps(birthday_state, ensure_ascii=False), encoding="utf-8")
+                                                safe_send_message(thread_id, (
+                                                    "🎂 𝗦𝗠𝗪 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 𝗦𝗖𝗛𝗘𝗗𝗨𝗟𝗘𝗥\n\n"
+                                                    f"✅ 𝗦𝗧𝗔𝗧𝗨𝗦 ➜ SCHEDULED\n👤 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 ➜ {BIRTHDAY_NAME} (@{BIRTHDAY_USERNAME})\n"
+                                                    f"⏳ 𝗖𝗢𝗨𝗡𝗧𝗗𝗢𝗪𝗡 𝗦𝗧𝗔𝗥𝗧 ➜ {countdown_start_dt.strftime('%d %b %Y %H:%M')} IST\n"
+                                                    f"🎉 𝗪𝗜𝗦𝗛 𝗧𝗜𝗠𝗘 ➜ {target_dt.strftime('%d %b %Y %H:%M')} IST\n\n"
+                                                    "The schedule is saved and will be restored after a process restart, provided the host preserves this state file."
+                                                ))
+                                                logging.info("birthday_command_scheduled thread=%s start=%s target=%s", thread_id, BIRTHDAY_COUNTDOWN_START_AT, target_dt.isoformat())
+                                            except ValueError:
+                                                safe_send_message(thread_id, "Usage: 𝗦𝗠𝗪🚩 !birthday start HH:MM [YYYY-MM-DD] [HH:MM]\nExample: 𝗦𝗠𝗪🚩 !birthday start 23:50\nFull form: 𝗦𝗠𝗪🚩 !birthday start 23:50 2026-10-29 00:00")
+                                            continue
+                                        elif subcommand == "stop":
+                                            birthday_state["command_config"] = {"enabled": False}
+                                            BIRTHDAY_THREAD_ID = ""
+                                            BIRTHDAY_COUNTDOWN_START_AT = ""
+                                            BIRTHDAY_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                                            BIRTHDAY_STATE_FILE.write_text(json.dumps(birthday_state, ensure_ascii=False), encoding="utf-8")
+                                            safe_send_message(thread_id, "🛑 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 𝗖𝗢𝗨𝗡𝗧𝗗𝗢𝗪𝗡 𝗦𝗧𝗢𝗣𝗣𝗘𝗗")
+                                            continue
+                                        elif subcommand == "status":
+                                            if BIRTHDAY_THREAD_ID and BIRTHDAY_COUNTDOWN_START_AT:
+                                                safe_send_message(thread_id, f"🎂 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 𝗦𝗧𝗔𝗧𝗨𝗦 ➜ SCHEDULED\n👤 @{BIRTHDAY_USERNAME} ({BIRTHDAY_NAME})\n⏳ Start: {BIRTHDAY_COUNTDOWN_START_AT}\n🎉 Wish: {BIRTHDAY_DATE} {BIRTHDAY_TIME}\n🆔 Target GC: {BIRTHDAY_THREAD_ID}")
+                                            else:
+                                                safe_send_message(thread_id, "🎂 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 𝗦𝗧𝗔𝗧𝗨𝗦 ➜ NOT SCHEDULED\nUse: 𝗦𝗠𝗪🚩 !birthday start 23:50")
+                                            continue
+                                        else:
+                                            safe_send_message(thread_id, "🎂 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦\n𝗦𝗠𝗪🚩 !birthday start 23:50 [YYYY-MM-DD] [HH:MM]\n𝗦𝗠𝗪🚩 !birthday status\n𝗦𝗠𝗪🚩 !birthday stop")
+                                            continue
                                     # Call/music status cards are intentionally honest: the current
                                     # instagrapi integration does not expose supported live group-call
                                     # answer/join or audio-publishing controls. Never claim playback.
@@ -1643,6 +1765,7 @@ def start_bot():
                                             "📊 GROUP: !gc | !gcanalytics | !gcs | !gcuser @username | !members | !active | !inactive 7 | !joins | !leaves\n\n"
                                             "🧾 HISTORY: !history 20 | !gchistory | !gcevents | !events | !memberhistory @username | !search WORD | !messages WORD\n\n"
                                             "🛡️ MODERATION: !rules | !antispam | !clearuser @username | !resetwarn @username | !lockdown | !unlock | !target @username | !target remove @username | !target list | !target clear | !shadowban @username | !nuke @username\n\n"
+                                            "🎂 BIRTHDAY: !birthday start 23:50 [YYYY-MM-DD] [HH:MM] | !birthday status | !birthday stop\n\n"
                                             "⚙️ DEVELOPER: !health | !performance | !status | !panel | !analytics | !botinfo | !session | !logs | !auditlog 20 | !backup | !report | !uptime | !safe_mode\n\n"
                                             "📞 CALL / MUSIC STATUS: !call | !play SONG NAME | !stop | !musicstatus (status cards only; live Instagram call/audio control is not supported by this client)\n\n"
                                             "🧩 CUSTOM: !addcmd NAME | REPLY TEXT | !editcmd NAME | REPLY TEXT | !delcmd NAME | !cmds\n\n"
@@ -1665,7 +1788,7 @@ def start_bot():
                                         else:
                                             cmd_name = parts[1].strip().lstrip("!").casefold()
                                             reply_text = parts[2].split("|", 1)[1].strip()
-                                            if not re.fullmatch(r"[a-z0-9_]{2,32}", cmd_name) or cmd_name in {"help", "panel", "status", "analytics", "rules", "addcmd", "editcmd", "delcmd", "cmds", "clearuser", "resetuser", "unrestrict", "gc", "gcanalytics", "gcs", "gcuser", "session", "safe_mode", "logs", "backup", "lockdown", "unlock", "godmode", "target", "shadowban", "nuke", "resetwarn", "unwarn", "antispam", "report", "inactive", "tagall", "active", "members", "admins", "dp", "profile", "user", "stats", "botinfo", "uptime", "call", "play", "stop", "musicstatus"}:
+                                            if not re.fullmatch(r"[a-z0-9_]{2,32}", cmd_name) or cmd_name in {"help", "panel", "status", "analytics", "rules", "addcmd", "editcmd", "delcmd", "cmds", "clearuser", "resetuser", "unrestrict", "gc", "gcanalytics", "gcs", "gcuser", "session", "safe_mode", "logs", "backup", "lockdown", "unlock", "godmode", "target", "shadowban", "nuke", "resetwarn", "unwarn", "antispam", "report", "inactive", "tagall", "active", "members", "admins", "dp", "profile", "user", "stats", "botinfo", "uptime", "call", "play", "stop", "musicstatus", "birthday"}:
                                                 safe_send_message(thread_id, "❌ Invalid or reserved command name. Use 2-32 letters, digits, or underscores.")
                                             elif not reply_text:
                                                 safe_send_message(thread_id, "❌ Reply text cannot be empty.")
