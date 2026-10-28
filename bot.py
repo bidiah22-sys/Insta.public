@@ -35,7 +35,7 @@ load_dotenv()
 # Existing inline session variable copied from the user's previous bot file.
 # Hosting environment variables still take priority if configured.
 INLINE_SESSION_ID = ""
-INSTAGRAM_SESSION_ID = (os.getenv("INSTAGRAM_SESSION_ID", "").strip()
+INSTAGRAM_SESSION_ID = ("51627832873%3AnBmjA0bTRR2qx2%3A10%3AAYnzU1jYa8VbtMaFpE6jlYIjG4x5vBacIh2sEO2h9Q").strip()
                         or os.getenv("IG_SESSION_ID", "").strip()
                         or INLINE_SESSION_ID.strip())
 
