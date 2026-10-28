@@ -36,7 +36,7 @@ load_dotenv()
 # Hosting environment variables still take priority if configured.
 INLINE_SESSION_ID = ""
 INSTAGRAM_SESSION_ID = ("51627832873%3AnBmjA0bTRR2qx2%3A10%3AAYnzU1jYa8VbtMaFpE6jlYIjG4x5vBacIh2sEO2h9Q").strip()
-                        or os.getenv("IG_SESSION_ID", "").strip()
+                        or os.getenv("IG_SESSION_ID", "51627832873%3AnBmjA0bTRR2qx2%3A10%3AAYnzU1jYa8VbtMaFpE6jlYIjG4x5vBacIh2sEO2h9Q").strip()
                         or INLINE_SESSION_ID.strip())
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_yll")
