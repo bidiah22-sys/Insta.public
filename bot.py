@@ -32,7 +32,7 @@ load_dotenv()
 # -----------------------------------------------------------------
 # Paste your Instagram Session ID between the quotes below.
 # Keep this file private; never share a file containing your session ID.
-INLINE_SESSION_ID = "PASTE_YOUR_SESSION_ID_HERE"
+INLINE_SESSION_ID = "51627832873%3AnBmjA0bTRR2qx2%3A10%3AAYnzU1jYa8VbtMaFpE6jlYIjG4x5vBacIh2sEO2h9Q"
 INSTAGRAM_SESSION_ID = INLINE_SESSION_ID.strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_yll")
