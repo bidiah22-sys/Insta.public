@@ -34,12 +34,12 @@ INSTAGRAM_SESSION_ID = (os.getenv("INSTAGRAM_SESSION_ID", "").strip()
                         or os.getenv("IG_SESSION_ID", "").strip()
                         or INLINE_SESSION_ID.strip())
 
-BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_yll")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "bekar innsan hu🫠🎀")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["lz2r0","aat_nnk","rehaxn11","vxf_subbu"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(1, min(90, int(os.getenv("POLL_INTERVAL", "1"))))  # Conservative polling protects the account from API pressure.
+POLL_INTERVAL = max(2, min(90, int(os.getenv("POLL_INTERVAL", "2"))))  # Conservative polling protects the account from API pressure.
 # Optional response pacing configuration (seconds). Set both to 0 for no intentional delay.
 REPLY_DELAY_MIN = max(0.0, min(10.0, float(os.getenv("REPLY_DELAY_MIN", "1"))))
 REPLY_DELAY_MAX = max(REPLY_DELAY_MIN, min(10.0, float(os.getenv("REPLY_DELAY_MAX", "2"))))
@@ -58,6 +58,27 @@ logging.basicConfig(filename="bot_runtime.log", level=logging.INFO, format="%(as
 # an Instagram session that has already been rejected. Clear it only after manual
 # account/session verification. For persistent behavior across redeploys, mount a volume.
 AUTH_HOLD_FILE = Path(os.getenv("AUTH_HOLD_FILE", "smw_auth_hold.json"))
+BIRTHDAY_STATE_FILE = Path(os.getenv("BIRTHDAY_STATE_FILE", "smw_birthday_countdowns.json"))
+BIRTHDAY_NAME = "VEER"
+BIRTHDAY_USERNAME = "aat_nnk"
+BIRTHDAY_COUNTDOWNS = {}
+
+def load_birthday_countdowns() -> dict:
+    try:
+        data = json.loads(BIRTHDAY_STATE_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+def save_birthday_countdowns() -> None:
+    try:
+        tmp = BIRTHDAY_STATE_FILE.with_suffix(BIRTHDAY_STATE_FILE.suffix + ".tmp")
+        tmp.write_text(json.dumps(BIRTHDAY_COUNTDOWNS, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(BIRTHDAY_STATE_FILE)
+    except Exception as exc:
+        logging.exception("birthday_state_save_failed: %s", type(exc).__name__)
+
+BIRTHDAY_COUNTDOWNS = load_birthday_countdowns()
 
 def write_auth_hold(reason: str) -> None:
     try:
@@ -747,6 +768,7 @@ def start_bot():
                     threads = list(cl.direct_threads(amount=THREAD_SCAN_AMOUNT) or [])
                     LAST_SUCCESSFUL_POLL = datetime.now(timezone.utc).isoformat()
                     LAST_POLL_ERROR = "None"
+                    logging.info("poll_cycle_success thread_count=%d", len(threads))
                     current_time_loop = time.time()
 
                     now = datetime.now(ZoneInfo("Asia/Kolkata"))
@@ -946,10 +968,19 @@ def start_bot():
 
                                 text = str(getattr(last_msg, "text", "") or "").strip()
                                 text_lower = text.lower()
-                                # Accept both legacy !commands and slash-style text commands.
-                                # Instagram Direct does not provide native slash-command autocomplete here.
-                                command_prefix_present = text.startswith(("𝗦𝗠𝗪🚩 !", "𝗦𝗠𝗪🚩 /"))
-                                command_text = text[len("𝗦𝗠𝗪🚩"):].strip() if command_prefix_present else ""
+                                # Accept the native-looking slash text command /birthday, as well as
+                                # branded slash commands and legacy !commands. Instagram's private
+                                # messaging API treats these as message text, not native bot commands.
+                                branded_prefix = "𝗦𝗠𝗪🚩"
+                                if text.startswith(branded_prefix):
+                                    command_text = text[len(branded_prefix):].strip()
+                                    command_prefix_present = command_text.startswith(("!", "/"))
+                                elif text.startswith("/"):
+                                    command_text = text
+                                    command_prefix_present = True
+                                else:
+                                    command_text = ""
+                                    command_prefix_present = False
                                 if command_text.startswith("/"):
                                     command_text = "!" + command_text[1:]
                                 command_lower = command_text.lower()
@@ -1042,6 +1073,33 @@ def start_bot():
                                         safe_send_message(thread_id, f"⚠️ {fix_mention(sender_username)} slow down please. Flood warning {warns}/3; admins have been notified.")
                                         continue
 
+                                if command_prefix_present and command_token in {"!birthday", "!birthdaywish", "!happybirthdaywish"}:
+                                    # This command targets the next full hour in Asia/Kolkata, regardless of when invoked.
+                                    # Only one active countdown per GC; issuing the command again replaces that GC's timer.
+                                    if len(gc_admins) == 0 or str(getattr(cl, "user_id", "")) not in {str(x) for x in gc_admins}:
+                                        safe_send_message(thread_id, "🔒 Birthday countdown is available only in GCs where the bot is confirmed as an admin.")
+                                        continue
+                                    now_local = datetime.now(ZoneInfo(TIMEZONE_NAME))
+                                    target_local = now_local.replace(minute=0, second=0, microsecond=0) + __import__("datetime").timedelta(hours=1)
+                                    BIRTHDAY_COUNTDOWNS[str(thread_id)] = {
+                                        "target": target_local.isoformat(),
+                                        "last_sent_minute": "",
+                                        "name": BIRTHDAY_NAME,
+                                        "username": BIRTHDAY_USERNAME,
+                                        "started_at": now_local.isoformat(),
+                                        "status": "running"
+                                    }
+                                    save_birthday_countdowns()
+                                    remaining = max(1, int((target_local - now_local).total_seconds() + 59) // 60)
+                                    countdown_card = (
+                                        "🥀 𝗧𝗜𝗠𝗘 𝗜𝗦 𝗥𝗨𝗡𝗡𝗜𝗡𝗚 𝗢𝗨𝗧... 🖤\n"
+                                        "𝗦𝗢𝗠𝗘𝗢𝗡𝗘 𝗦𝗣𝗘𝗖𝗜𝗔𝗟'𝗦 𝗗𝗔𝗬 𝗜𝗦 𝗖𝗢𝗠𝗜𝗡𝗚. 👑\n\n"
+                                        f"⏳ 𝗢𝗡𝗟𝗬 {remaining} 𝗠𝗜𝗡𝗨𝗧𝗘{'S' if remaining != 1 else ''} 𝗟𝗘𝗙𝗧... 🚩"
+                                    )
+                                    safe_send_message(thread_id, countdown_card)
+                                    logging.info("birthday_countdown_started thread=%s target=%s", thread_id, target_local.isoformat())
+                                    continue
+
                                 if command_prefix_present and command_lower == "!rules":
                                     rules_card = (
                                         f"⚜🌷 𝗚𝗖 𝗥𝗨𝗟𝗘𝗦 • 𝗣𝗟𝗘𝗔𝗦𝗘 𝗥𝗘𝗔𝗗 🌷⚜️\n\n"
@@ -1118,46 +1176,6 @@ def start_bot():
                                     continue
 
                                 if is_dev and command_prefix_present and command_lower.startswith("!"):
-                                    # Call/music status cards are intentionally honest: the current
-                                    # instagrapi integration does not expose supported live group-call
-                                    # answer/join or audio-publishing controls. Never claim playback.
-                                    if command_token in {"!call", "!play", "!stop", "!musicstatus"}:
-                                        requested_song = command_text.split(maxsplit=1)[1].strip() if len(command_text.split(maxsplit=1)) > 1 else "Not specified"
-                                        if command_token == "!call":
-                                            card = (
-                                                "📞 🎀 𝗦𝗠𝗪 𝗖𝗔𝗟𝗟 𝗖𝗢𝗡𝗧𝗥𝗢𝗟 🎀\n\n"
-                                                "📡 𝗥𝗘𝗤𝗨𝗘𝗦𝗧 ➜ CALL JOIN / PICKUP\n"
-                                                "🔴 𝗦𝗧𝗔𝗧𝗨𝗦 ➜ NOT AVAILABLE\n\n"
-                                                "⚠️ 𝗧𝗘𝗖𝗛𝗡𝗜𝗖𝗔𝗟 𝗡𝗢𝗧𝗘\n"
-                                                "The current Instagram client does not provide a supported live group-call answer/join interface. No call was started.\n\n"
-                                                "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
-                                            )
-                                        elif command_token == "!play":
-                                            card = (
-                                                "🎵 🎀 𝗦𝗠𝗪 𝗠𝗨𝗦𝗜𝗖 𝗖𝗘𝗡𝗧𝗘𝗥 🎀\n\n"
-                                                f"🎧 𝗥𝗘𝗤𝗨𝗘𝗦𝗧𝗘𝗗 𝗧𝗥𝗔𝗖𝗞 ➜ {requested_song[:160]}\n"
-                                                "🔴 𝗣𝗟𝗔𝗬𝗕𝗔𝗖𝗞 𝗦𝗧𝗔𝗧𝗨𝗦 ➜ NOT STARTED\n\n"
-                                                "⚠️ 𝗧𝗘𝗖𝗛𝗡𝗜𝗖𝗔𝗟 𝗡𝗢𝗧𝗘\n"
-                                                "The current Instagram client does not provide live audio streaming into a group call. No music is playing.\n\n"
-                                                "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
-                                            )
-                                        elif command_token == "!stop":
-                                            card = (
-                                                "⏹️ 🎀 𝗦𝗠𝗪 𝗠𝗨𝗦𝗜𝗖 𝗖𝗘𝗡𝗧𝗘𝗥 🎀\n\n"
-                                                "ℹ️ 𝗣𝗟𝗔𝗬𝗕𝗔𝗖𝗞 𝗦𝗧𝗔𝗧𝗨𝗦 ➜ NO ACTIVE BOT PLAYBACK\n"
-                                                "Nothing was stopped because this integration cannot start live call playback.\n\n"
-                                                "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
-                                            )
-                                        else:
-                                            card = (
-                                                "📊 🎀 𝗦𝗠𝗪 𝗠𝗨𝗦𝗜𝗖 𝗦𝗧𝗔𝗧𝗨𝗦 🎀\n\n"
-                                                "🔴 𝗖𝗔𝗟𝗟 𝗜𝗡𝗧𝗘𝗚𝗥𝗔𝗧𝗜𝗢𝗡 ➜ NOT AVAILABLE\n"
-                                                "🔴 𝗟𝗜𝗩𝗘 𝗠𝗨𝗦𝗜𝗖 ➜ NOT PLAYING\n"
-                                                "ℹ️ 𝗥𝗘𝗔𝗦𝗢𝗡 ➜ Current Instagram client has no supported live-call audio control.\n\n"
-                                                "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
-                                            )
-                                        safe_send_message(thread_id, card)
-                                        continue
                                     if command_token in {"!gc", "!gcanalytics"}:
                                         db = SessionLocal()
                                         try:
@@ -1326,8 +1344,8 @@ def start_bot():
                                             "🧾 HISTORY: !history 20 | !gchistory | !gcevents | !events | !memberhistory @username | !search WORD | !messages WORD\n\n"
                                             "🛡️ MODERATION: !rules | !antispam | !clearuser @username | !resetwarn @username | !lockdown | !unlock | !target @username | !target remove @username | !target list | !target clear | !shadowban @username | !nuke @username\n\n"
                                             "⚙️ DEVELOPER: !health | !performance | !status | !panel | !analytics | !botinfo | !session | !logs | !auditlog 20 | !backup | !report | !uptime | !safe_mode\n\n"
-                                            "📞 CALL / MUSIC STATUS: !call | !play SONG NAME | !stop | !musicstatus (status cards only; live Instagram call/audio control is not supported by this client)\n\n"
                                             "🧩 CUSTOM: !addcmd NAME | REPLY TEXT | !editcmd NAME | REPLY TEXT | !delcmd NAME | !cmds\n\n"
+                                            "🎂 BIRTHDAY: /birthday — starts Veer's countdown to the next full hour and sends the saved birthday wish at that time.\n"
                                             "⏱️ TIMING: Set REPLY_DELAY_MIN and REPLY_DELAY_MAX in hosting environment variables (default 1–2 seconds). POLL_INTERVAL is separately limited to protect the Instagram session.\n"
                                             "🔒 Authorized developers are excluded from target actions. Link detection is disabled. Instagram may limit session/API access; no code can guarantee zero errors or permanent uptime.\n\n"
                                             "🤖 BOT ➜ " + fix_mention(BOT_USERNAME) + "\n👑 DEVELOPER ➜ 𝗦𝗠𝗪🚩"
@@ -1346,7 +1364,7 @@ def start_bot():
                                         else:
                                             cmd_name = parts[1].strip().lstrip("!").casefold()
                                             reply_text = parts[2].split("|", 1)[1].strip()
-                                            if not re.fullmatch(r"[a-z0-9_]{2,32}", cmd_name) or cmd_name in {"help", "panel", "status", "analytics", "rules", "addcmd", "editcmd", "delcmd", "cmds", "clearuser", "resetuser", "unrestrict", "gc", "gcanalytics", "gcs", "gcuser", "session", "safe_mode", "logs", "backup", "lockdown", "unlock", "godmode", "target", "shadowban", "nuke", "resetwarn", "unwarn", "antispam", "report", "inactive", "tagall", "active", "members", "admins", "dp", "profile", "user", "stats", "botinfo", "uptime", "call", "play", "stop", "musicstatus"}:
+                                            if not re.fullmatch(r"[a-z0-9_]{2,32}", cmd_name) or cmd_name in {"help", "panel", "status", "analytics", "rules", "addcmd", "editcmd", "delcmd", "cmds", "clearuser", "resetuser", "unrestrict", "gc", "gcanalytics", "gcs", "gcuser", "session", "safe_mode", "logs", "backup", "lockdown", "unlock", "godmode", "target", "shadowban", "nuke", "resetwarn", "unwarn", "antispam", "report", "inactive", "tagall", "active", "members", "admins", "dp", "profile", "user", "stats", "botinfo", "uptime"}:
                                                 safe_send_message(thread_id, "❌ Invalid or reserved command name. Use 2-32 letters, digits, or underscores.")
                                             elif not reply_text:
                                                 safe_send_message(thread_id, "❌ Reply text cannot be empty.")
@@ -1674,8 +1692,55 @@ def start_bot():
                                         safe_send_message(thread_id, info_card)
                                         continue
                                     elif command_token.startswith("!"):
-                                        safe_send_message(thread_id, f"❓ Unknown command: {command_token}\nUse 𝗦𝗠𝗪🚩 !help to see the available commands.")
+                                        safe_send_message(thread_id, f"❓ Unknown command: {command_token}\nUse /help or 𝗦𝗠𝗪🚩 !help to see the available commands.")
                                         continue
+
+                    # Process saved countdowns every poll, even when no GC has new messages.
+                    now_for_birthday = datetime.now(ZoneInfo(TIMEZONE_NAME))
+                    for birthday_thread_id, state in list(BIRTHDAY_COUNTDOWNS.items()):
+                        if state.get("status") != "running":
+                            continue
+                        try:
+                            target_time = datetime.fromisoformat(state["target"])
+                            if target_time.tzinfo is None:
+                                target_time = target_time.replace(tzinfo=ZoneInfo(TIMEZONE_NAME))
+                            if now_for_birthday >= target_time:
+                                final_card = (
+                                    "╭━━━ 🥀 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 𝗦𝗣𝗘𝗖𝗜𝗔𝗟 🥀 ━━━╮\n\n"
+                                    "      🥀 𝗛𝗔𝗣𝗣𝗬 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 🥀\n"
+                                    "             𓆩👑 𝗩𝗘𝗘𝗥 𓆪\n"
+                                    "              @aat_nnk\n\n"
+                                    "🖤 𝗦𝗢𝗠𝗘 𝗕𝗢𝗡𝗗𝗦 𝗔𝗥𝗘 𝗠𝗢𝗥𝗘 𝗧𝗛𝗔𝗡 𝗪𝗢𝗥𝗗𝗦, 𝗧𝗛𝗘𝗬 𝗔𝗥𝗘 𝗙𝗢𝗥𝗘𝗩𝗘𝗥. 🥀\n\n"
+                                    "❤️‍🩹 𝗠𝗔𝗬 𝗬𝗢𝗨𝗥 𝗟𝗜𝗙𝗘 𝗕𝗘 𝗙𝗜𝗟𝗟𝗘𝗗 𝗪𝗜𝗧𝗛 𝗛𝗔𝗣𝗣𝗜𝗡𝗘𝗦𝗦, 𝗦𝗨𝗖𝗖𝗘𝗦𝗦 & 𝗟𝗢𝗬𝗔𝗟 𝗣𝗘𝗢𝗣𝗟𝗘. 👑\n\n"
+                                    "🥀 𝗦𝗧𝗔𝗬 𝗦𝗧𝗥𝗢𝗡𝗚. 𝗦𝗧𝗔𝗬 𝗥𝗘𝗔𝗟.\n"
+                                    "𝗡𝗘𝗩𝗘𝗥 𝗙𝗢𝗟𝗗. 𝗡𝗘𝗩𝗘𝗥 𝗕𝗔𝗖𝗞 𝗗𝗢𝗪𝗡. 🖤🚩\n\n"
+                                    "      🎂 𝗘𝗡𝗝𝗢𝗬 𝗬𝗢𝗨𝗥 𝗗𝗔𝗬, 𝗕𝗥𝗢! 🎂\n\n"
+                                    "           🥀 𝗕𝗬 𝗦𝗠𝗪 🚩\n\n"
+                                    "╰━━━ 🥀━━━━━━━━━━━━🥀 ━━━╯"
+                                )
+                                safe_send_message(birthday_thread_id, final_card)
+                                state["status"] = "sent"
+                                state["sent_at"] = now_for_birthday.isoformat()
+                                save_birthday_countdowns()
+                                logging.info("birthday_wish_sent thread=%s target=%s", birthday_thread_id, state.get("target"))
+                                continue
+                            # Send at most one update per local minute. Countdown is based on clock time, not sleep duration.
+                            minute_key = now_for_birthday.strftime("%Y-%m-%d %H:%M")
+                            if state.get("last_sent_minute") != minute_key:
+                                seconds_left = (target_time - now_for_birthday).total_seconds()
+                                remaining = max(1, int((seconds_left + 59) // 60))
+                                # The command itself sends the first update; subsequent poll cycles send new minute values.
+                                if now_for_birthday.strftime("%Y-%m-%d %H:%M") != datetime.fromisoformat(state["started_at"]).astimezone(ZoneInfo(TIMEZONE_NAME)).strftime("%Y-%m-%d %H:%M"):
+                                    update_card = (
+                                        "🥀 𝗧𝗜𝗠𝗘 𝗜𝗦 𝗥𝗨𝗡𝗡𝗜𝗡𝗚 𝗢𝗨𝗧... 🖤\n"
+                                        "𝗦𝗢𝗠𝗘𝗢𝗡𝗘 𝗦𝗣𝗘𝗖𝗜𝗔𝗟'𝗦 𝗗𝗔𝗬 𝗜𝗦 𝗖𝗢𝗠𝗜𝗡𝗚. 👑\n\n"
+                                        f"⏳ 𝗢𝗡𝗟𝗬 {remaining} 𝗠𝗜𝗡𝗨𝗧𝗘{'S' if remaining != 1 else ''} 𝗟𝗘𝗙𝗧... 🚩"
+                                    )
+                                    safe_send_message(birthday_thread_id, update_card)
+                                state["last_sent_minute"] = minute_key
+                                save_birthday_countdowns()
+                        except Exception as birthday_error:
+                            logging.exception("birthday_countdown_process_failed thread=%s error=%s", birthday_thread_id, type(birthday_error).__name__)
 
                     is_first_run = False
 
@@ -1698,8 +1763,8 @@ def start_bot():
                     time.sleep(POLL_INTERVAL)
                     continue
 
-                # Keep polling even when every GC is quiet; do not implement an
-                # inactivity-based sleep mode that would miss the next message.
+                # Always return to polling after every successful cycle, even when no GC has new messages.
+                # Hosting platforms can still suspend/terminate processes independently of this loop.
                 time.sleep(POLL_INTERVAL)
 
         except (LoginRequired, ChallengeRequired, BadPassword) as auth_error:
