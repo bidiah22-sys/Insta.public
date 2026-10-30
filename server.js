@@ -33,9 +33,9 @@ app.post("/chat", async (req, res) => {
             });
         }
 
-        // यहाँ मॉडल का नाम बदलकर 'gemini-2.5-flash' या 'gemini-1.5' कर दिया है जो नया SDK सपोर्ट करता है
+        // गूगल के निर्देशानुसार नया और सही मॉडल नाम 'gemini-3.8-flash' सेट किया गया है
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3.8-flash',
             contents: message.trim(),
         });
 
