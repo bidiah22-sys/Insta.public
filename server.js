@@ -6,7 +6,7 @@ app.use(express.json({ limit: "20kb" }));
 
 const PORT = process.env.PORT || 3000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-3.0-flash";
 
 app.get("/", (req, res) => {
     res.json({
