@@ -33,11 +33,22 @@ app.post("/chat", async (req, res) => {
             });
         }
 
-        // गूगल के निर्देशानुसार नया और सही मॉडल नाम 'gemini-3.8-flash' सेट किया गया है
-        const response = await ai.models.generateContent({
-            model: 'gemini-3.8-flash',
-            contents: message.trim(),
-        });
+        let response;
+        let attempts = 3;
+        
+        // हाई डिमांड (503) आने पर खुद से 3 बार कोशिश करने वाला लूप
+        for (let i = 0; i < attempts; i++) {
+            try {
+                response = await ai.models.generateContent({
+                    model: 'gemini-1.5-flash',
+                    contents: message.trim(),
+                });
+                break; // अगर सफलता मिल गई तो लूप से बाहर आ जाओ
+            } catch (err) {
+                if (i === attempts - 1) throw err; // अगर आखिरी कोशिश भी फेल हो, तो एरर फेंको
+                await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5 सेकंड रुककर दोबारा ट्राई करो
+            }
+        }
 
         const reply = response.text;
 
@@ -55,7 +66,7 @@ app.post("/chat", async (req, res) => {
     } catch (error) {
         console.error("Gemini SDK Error:", error);
         res.status(500).json({ 
-            error: "Internal server error during AI processing: " + error.message 
+            error: "AI service is busy right now. Please try again in a moment." 
         });
     }
 });
