@@ -1,17 +1,15 @@
 import express from "express";
-import { GoogleGenAI } from "@google/genai";
 
 const app = express();
 app.use(express.json({ limit: "20kb" }));
 
 const PORT = process.env.PORT || 3000;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+// यहाँ हम Groq की API Key इस्तेमाल करेंगे (जो बिल्कुल फ्री और सुपरफास्ट है)
+const GROQ_API_KEY = process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
 
 app.get("/", (req, res) => {
     res.json({
-        app: "SHIVAM AI OFFICIAL SDK",
+        app: "SHIVAM AI GROQ ENGINE",
         status: "ONLINE",
         developer: "SMW"
     });
@@ -19,12 +17,6 @@ app.get("/", (req, res) => {
 
 app.post("/chat", async (req, res) => {
     try {
-        if (!GEMINI_API_KEY) {
-            return res.status(500).json({ 
-                error: "GEMINI_API_KEY is missing in environment variables." 
-            });
-        }
-
         const message = req.body.message || req.body.prompt;
 
         if (!message || typeof message !== "string" || !message.trim()) {
@@ -33,44 +25,54 @@ app.post("/chat", async (req, res) => {
             });
         }
 
-        let response;
-        let attempts = 3;
-        
-        // हाई डिमांड (503) आने पर खुद से 3 बार कोशिश करने वाला लूप
-        for (let i = 0; i < attempts; i++) {
-            try {
-                response = await ai.models.generateContent({
-                    model: 'gemini-1.5-flash',
-                    contents: message.trim(),
-                });
-                break; // अगर सफलता मिल गई तो लूप से बाहर आ जाओ
-            } catch (err) {
-                if (i === attempts - 1) throw err; // अगर आखिरी कोशिश भी फेल हो, तो एरर फेंको
-                await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5 सेकंड रुककर दोबारा ट्राई करो
-            }
+        // Groq का सुपरफास्ट और स्टेबल API एंडपॉइंट (Llama 3 मॉडल - कभी फेल नहीं होता)
+        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${GROQ_API_KEY}`
+            },
+            body: JSON.stringify({
+                model: "llama-3.3-70b-versatile",
+                messages: [
+                    { role: "system", content: "You are SHIVAM AI, a personal assistant created by SMW. Reply naturally in Hindi, English or Hinglish." },
+                    { role: "user", content: message.trim() }
+                ],
+                temperature: 0.7,
+                max_tokens: 1024
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            console.error("Groq API error:", data);
+            return res.status(502).json({ 
+                error: data.error?.message || "AI service could not process the request." 
+            });
         }
 
-        const reply = response.text;
+        const reply = data.choices?.[0]?.message?.content?.trim();
 
         if (!reply) {
             return res.status(502).json({ 
-                error: "No response text received from Gemini SDK." 
+                error: "No response received from AI." 
             });
         }
 
         res.json({
             success: true,
-            reply: reply.trim()
+            reply: reply
         });
 
     } catch (error) {
-        console.error("Gemini SDK Error:", error);
+        console.error("Server error:", error);
         res.status(500).json({ 
-            error: "AI service is busy right now. Please try again in a moment." 
+            error: "Internal server error: " + error.message 
         });
     }
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-    console.log(`SHIVAM AI SDK Server running on port ${PORT}`);
+    console.log(`SHIVAM AI Groq Server running on port ${PORT}`);
 });
