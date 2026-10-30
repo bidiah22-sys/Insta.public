@@ -1,6 +1,0 @@
-# ð—¦ð— ð—ªðŸš© Bot v5 dependencies
-# instagrapi 3.x requires Python 3.10+.
-instagrapi==3.0.25
-python-dotenv>=1.0,<2
-SQLAlchemy>=2.0,<3
-psycopg2-binary>=2.9,<3
