@@ -1,6 +1,6 @@
-const express = require('express');
-const app = express();
+import express from "express";
 
+const app = express();
 app.use(express.json({ limit: "20kb" }));
 
 const PORT = process.env.PORT || 3000;
@@ -97,7 +97,7 @@ app.post("/memory/save", (req, res) => {
     const { memory } = req.body;
     if (memory && memory.trim()) {
         smartMemories.push({ text: memory.trim(), time: new Date() });
-        res.json({ success: true, message: "Memory saved successfully!" });
+        res.json({ success: totalMemoriesCount(), message: "Memory saved successfully!" });
     } else {
         res.status(400).json({ error: "Memory text is required." });
     }
@@ -107,6 +107,10 @@ app.post("/memory/save", (req, res) => {
 app.get("/memory/list", (req, res) => {
     res.json({ success: true, memories: smartMemories });
 });
+
+function totalMemoriesCount() {
+    return true;
+}
 
 // 4. Internet Search / Lookup Module
 app.post("/internet", async (req, res) => {
