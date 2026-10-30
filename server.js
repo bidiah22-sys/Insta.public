@@ -4,12 +4,11 @@ const app = express();
 app.use(express.json({ limit: "20kb" }));
 
 const PORT = process.env.PORT || 3000;
-// यहाँ हम Groq की API Key इस्तेमाल करेंगे (जो बिल्कुल फ्री और सुपरफास्ट है)
 const GROQ_API_KEY = process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
 
 app.get("/", (req, res) => {
     res.json({
-        app: "SHIVAM AI GROQ ENGINE",
+        app: "SHIVAM AI ULTIMATE ENGINE",
         status: "ONLINE",
         developer: "SMW"
     });
@@ -25,7 +24,6 @@ app.post("/chat", async (req, res) => {
             });
         }
 
-        // Groq का सुपरफास्ट और स्टेबल API एंडपॉइंट (Llama 3 मॉडल - कभी फेल नहीं होता)
         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
             headers: {
@@ -33,9 +31,9 @@ app.post("/chat", async (req, res) => {
                 "Authorization": `Bearer ${GROQ_API_KEY}`
             },
             body: JSON.stringify({
-                model: "llama-3.3-70b-versatile",
+                model: "llama-3.1-8b-instant",
                 messages: [
-                    { role: "system", content: "You are SHIVAM AI, a personal assistant created by SMW. Reply naturally in Hindi, English or Hinglish." },
+                    { role: "system", content: "You are SHIVAM AI, an ultra-fast personal assistant created by SMW. Reply quickly and naturally in Hindi, English or Hinglish." },
                     { role: "user", content: message.trim() }
                 ],
                 temperature: 0.7,
@@ -74,5 +72,5 @@ app.post("/chat", async (req, res) => {
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-    console.log(`SHIVAM AI Groq Server running on port ${PORT}`);
+    console.log(`SHIVAM AI Ultimate Server running on port ${PORT}`);
 });
