@@ -34,9 +34,9 @@ INSTAGRAM_SESSION_ID = (os.getenv("INSTAGRAM_SESSION_ID", "").strip()
                         or os.getenv("IG_SESSION_ID", "").strip()
                         or INLINE_SESSION_ID.strip())
 
-BOT_USERNAME = os.getenv("BOT_USERNAME", "vynxbot")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_yll")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-AUTHORIZED_DEVS = ["lz2r0","rehaxn11","vxf_subbu","aat_nnk"]
+AUTHORIZED_DEVS = ["lz2r0","aat_nnk"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
 POLL_INTERVAL = max(1, min(90, int(os.getenv("POLL_INTERVAL", "1"))))  # Conservative polling protects the account from API pressure.
@@ -1024,20 +1024,6 @@ def start_bot():
                                 if sender_id == bot_pk:
                                     continue
 
-                                # Reply only to an explicit group-wide greeting; do not react to a plain "hi".
-                                greeting_text = re.sub(r"[^a-z\s]", " ", text_lower)
-                                greeting_text = re.sub(r"\s+", " ", greeting_text).strip()
-                                if greeting_text in {"hello everyone", "hey everyone", "hello everybody", "hey everybody"}:
-                                    greeting_reply = "Hello everyone! How are you all? 😊"
-                                    try:
-                                        cl.direct_send(greeting_reply, thread_ids=[thread_id], reply_to_message_id=message_id)
-                                    except TypeError:
-                                        # Older client versions may not expose inline-reply support.
-                                        safe_send_message(thread_id, greeting_reply)
-                                    except Exception as greeting_error:
-                                        logging.warning("greeting_reply_failed thread=%s error=%s", thread_id, type(greeting_error).__name__)
-                                    continue
-
                                 admin_ids_str = {str(x) for x in gc_admins}
                                 is_sender_admin = sender_id in admin_ids_str
                                 is_dev = sender_username.lstrip("@").casefold() in {d.lstrip("@").casefold() for d in AUTHORIZED_DEVS}
@@ -1094,8 +1080,7 @@ def start_bot():
                                         safe_send_message(thread_id, "🔒 Birthday countdown is available only in GCs where the bot is confirmed as an admin.")
                                         continue
                                     now_local = datetime.now(ZoneInfo(TIMEZONE_NAME))
-                                    # Always run a fixed 10-minute countdown from the moment /birthday is used.
-                                    target_local = now_local + __import__("datetime").timedelta(minutes=10)
+                                    target_local = now_local.replace(minute=0, second=0, microsecond=0) + __import__("datetime").timedelta(hours=1)
                                     BIRTHDAY_COUNTDOWNS[str(thread_id)] = {
                                         "target": target_local.isoformat(),
                                         "last_sent_minute": "",
@@ -1360,7 +1345,7 @@ def start_bot():
                                             "🛡️ MODERATION: !rules | !antispam | !clearuser @username | !resetwarn @username | !lockdown | !unlock | !target @username | !target remove @username | !target list | !target clear | !shadowban @username | !nuke @username\n\n"
                                             "⚙️ DEVELOPER: !health | !performance | !status | !panel | !analytics | !botinfo | !session | !logs | !auditlog 20 | !backup | !report | !uptime | !safe_mode\n\n"
                                             "🧩 CUSTOM: !addcmd NAME | REPLY TEXT | !editcmd NAME | REPLY TEXT | !delcmd NAME | !cmds\n\n"
-                                            "🎂 BIRTHDAY: /birthday — starts a 10-minute countdown immediately and sends Veer's birthday wish when it ends.\n"
+                                            "🎂 BIRTHDAY: /birthday — starts Veer's countdown to the next full hour and sends the saved birthday wish at that time.\n"
                                             "⏱️ TIMING: Set REPLY_DELAY_MIN and REPLY_DELAY_MAX in hosting environment variables (default 1–2 seconds). POLL_INTERVAL is separately limited to protect the Instagram session.\n"
                                             "🔒 Authorized developers are excluded from target actions. Link detection is disabled. Instagram may limit session/API access; no code can guarantee zero errors or permanent uptime.\n\n"
                                             "🤖 BOT ➜ " + fix_mention(BOT_USERNAME) + "\n👑 DEVELOPER ➜ 𝗦𝗠𝗪🚩"
