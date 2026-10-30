@@ -7,7 +7,6 @@ app.use(express.json({ limit: "20kb" }));
 const PORT = process.env.PORT || 3000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// ऑफिशियल Google Gen AI SDK का सेटअप
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 app.get("/", (req, res) => {
@@ -34,17 +33,10 @@ app.post("/chat", async (req, res) => {
             });
         }
 
-        // सीधे गूगल के पक्के SDK से रिस्पॉन्स मंगाना
+        // यहाँ मॉडल का नाम बदलकर 'gemini-2.5-flash' या 'gemini-1.5' कर दिया है जो नया SDK सपोर्ट करता है
         const response = await ai.models.generateContent({
-            model: 'gemini-1.5-flash',
-            contents: [
-                {
-                    role: 'user',
-                    parts: [
-                        { text: `You are SHIVAM AI, a powerful personal assistant created by SMW. Reply naturally in Hindi, English or Hinglish.\n\nUser: ${message.trim()}` }
-                    ]
-                }
-            ]
+            model: 'gemini-2.5-flash',
+            contents: message.trim(),
         });
 
         const reply = response.text;
