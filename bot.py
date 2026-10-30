@@ -2,6 +2,7 @@ import os
 import re
 import unicodedata
 import time
+import sys
 from collections import deque
 import json
 import logging
@@ -36,10 +37,10 @@ INSTAGRAM_SESSION_ID = (os.getenv("INSTAGRAM_SESSION_ID", "").strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "vynxbot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-AUTHORIZED_DEVS = ["lz2r0","aat_nnk","rehaxn11","vxf_subbu"]
+AUTHORIZED_DEVS = ["lz2r0","aat_nnk", "vxf_subbu","rehaxn11"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(3, min(90, int(os.getenv("POLL_INTERVAL", "3"))))  # Conservative polling protects the account from API pressure.
+POLL_INTERVAL = max(5, min(90, int(os.getenv("POLL_INTERVAL", "5"))))  # Conservative polling protects the account from API pressure.
 # Optional response pacing configuration (seconds). Set both to 0 for no intentional delay.
 REPLY_DELAY_MIN = max(0.0, min(10.0, float(os.getenv("REPLY_DELAY_MIN", "1"))))
 REPLY_DELAY_MAX = max(REPLY_DELAY_MIN, min(10.0, float(os.getenv("REPLY_DELAY_MAX", "2"))))
@@ -53,7 +54,17 @@ STARTED_AT = time.time()
 TOTAL_SEEN_MESSAGES = 0
 LAST_SUCCESSFUL_POLL = None
 LAST_POLL_ERROR = "None"
-logging.basicConfig(filename="bot_runtime.log", level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+# Write diagnostics both to the hosting console and to bot_runtime.log.
+# This makes polling/API errors visible in Railway or a local terminal.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("bot_runtime.log", encoding="utf-8"),
+    ],
+    force=True,
+)
 # A local hold marker prevents Railway/process restarts from immediately retrying
 # an Instagram session that has already been rejected. Clear it only after manual
 # account/session verification. For persistent behavior across redeploys, mount a volume.
