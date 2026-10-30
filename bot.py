@@ -37,14 +37,14 @@ INSTAGRAM_SESSION_ID = (os.getenv("INSTAGRAM_SESSION_ID", "").strip()
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "vynxbot")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-AUTHORIZED_DEVS = ["lz2r0","aat_nnk", "vxf_subbu","rehaxn11"]
+AUTHORIZED_DEVS = ["lz2r0","aat_nnk", "vxf_subbu","vxf_subbu"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(5, min(90, int(os.getenv("POLL_INTERVAL", "5"))))  # Conservative polling protects the account from API pressure.
+POLL_INTERVAL = max(3, min(180, int(os.getenv("POLL_INTERVAL", "3"))))  # Conservative polling reduces repeated inbox API pressure.
 # Optional response pacing configuration (seconds). Set both to 0 for no intentional delay.
 REPLY_DELAY_MIN = max(0.0, min(10.0, float(os.getenv("REPLY_DELAY_MIN", "1"))))
 REPLY_DELAY_MAX = max(REPLY_DELAY_MIN, min(10.0, float(os.getenv("REPLY_DELAY_MAX", "2"))))
-THREAD_SCAN_AMOUNT = max(20, min(100, int(os.getenv("THREAD_SCAN_AMOUNT", "40"))))
+THREAD_SCAN_AMOUNT = max(5, min(30, int(os.getenv("THREAD_SCAN_AMOUNT", "40"))))
 TIMEZONE_NAME = os.getenv("TIMEZONE", "Asia/Kolkata")
 SEEN_MESSAGE_CACHE_LIMIT = 5000
 LOCAL_AUTO_REPLIES = True
@@ -121,6 +121,14 @@ def is_auth_rejection(exc: BaseException) -> bool:
         "login required", "checkpoint_required", "challenge_required",
         "challenge required", "please log in", "session has expired",
     ))
+
+
+def is_instagram_403(exc: BaseException) -> bool:
+    """Detect Instagram's forbidden response, including instagrapi ClientForbiddenError."""
+    message = f"{type(exc).__name__}: {exc}".casefold()
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    return status == 403 or "403 client error" in message or "clientforbiddenerror" in message or '"status_code":"403"' in message or '"status_code": "403"' in message
 
 
 def fix_mention(username: str) -> str:
@@ -1780,6 +1788,13 @@ def start_bot():
                     return
                 except Exception as e:
                     LAST_POLL_ERROR = type(e).__name__
+                    if is_instagram_403(e):
+                        # Instagram itself is refusing the Direct Inbox endpoint (403).
+                        # Do not hammer the same endpoint every poll; cool down before retrying.
+                        logging.exception("instagram_inbox_forbidden_403; pausing polling for 5 minutes")
+                        print("[!] Instagram returned HTTP 403 (Direct Inbox). This is an Instagram-side rejection, not a Python syntax error. Pausing requests for 5 minutes; check the account in the official app before retrying.")
+                        time.sleep(300)
+                        continue
                     logging.exception("poll_loop_error")
                     if is_auth_rejection(e):
                         write_auth_hold(type(e).__name__ + ": " + str(e))
