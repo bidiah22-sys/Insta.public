@@ -4,7 +4,8 @@ const app = express();
 app.use(express.json({ limit: "20kb" }));
 
 const PORT = process.env.PORT || 3000;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
+;
 
 let cachedModel = null;
 let modelCacheTime = 0;
@@ -21,7 +22,7 @@ app.get("/health", (req, res) => {
     res.json({
         status: "OK",
         app: "SHIVAM AI",
-        aiConfigured: Boolean(GEMINI_API_KEY)
+        aiConfigured: Boolean(OPENROUTER_API_KEY)
     });
 });
 
@@ -34,7 +35,7 @@ async function getAvailableModel() {
         "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
         {
             headers: {
-                "x-goog-api-key": GEMINI_API_KEY
+                "x-goog-api-key": OPENROUTER_API_KEY
             }
         }
     );
@@ -70,9 +71,9 @@ async function getAvailableModel() {
 
 app.post("/chat", async (req, res) => {
     try {
-        if (!GEMINI_API_KEY) {
+        if (!OPENROUTER_API_KEY) {
             return res.status(500).json({
-                error: "GEMINI_API_KEY is missing in Voroa environment variables."
+                error: "OPENROUTER_API_KEY is missing in Voroa environment variables."
             });
         }
 
@@ -96,7 +97,7 @@ app.post("/chat", async (req, res) => {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    "x-goog-api-key": GEMINI_API_KEY
+                    "x-goog-api-key":OPENROUTER_API_KEY 
                 },
                 body: JSON.stringify({
                     systemInstruction: {
