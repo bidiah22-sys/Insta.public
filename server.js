@@ -1,12 +1,13 @@
 import express from "express";
 
 const app = express();
-
 app.use(express.json({ limit: "20kb" }));
 
 const PORT = process.env.PORT || 3000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const MODEL = "gemini-3.0-flash";
+
+let cachedModel = null;
+let modelCacheTime = 0;
 
 app.get("/", (req, res) => {
     res.json({
@@ -16,15 +17,66 @@ app.get("/", (req, res) => {
     });
 });
 
+app.get("/health", (req, res) => {
+    res.json({
+        status: "OK",
+        app: "SHIVAM AI",
+        aiConfigured: Boolean(GEMINI_API_KEY)
+    });
+});
+
+async function getAvailableModel() {
+    if (cachedModel && Date.now() - modelCacheTime < 30 * 60 * 1000) {
+        return cachedModel;
+    }
+
+    const response = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+        {
+            headers: {
+                "x-goog-api-key": GEMINI_API_KEY
+            }
+        }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        console.error("Gemini model-list error:", data);
+        throw new Error("Unable to retrieve available Gemini models.");
+    }
+
+    const models = (data.models || []).filter(model =>
+        (model.supportedGenerationMethods || []).includes("generateContent") &&
+        /flash/i.test(model.name) &&
+        !/image|tts|live|transcribe/i.test(model.name)
+    );
+
+    if (models.length === 0) {
+        console.error("Available models:", data.models);
+        throw new Error("No compatible Gemini Flash model is available.");
+    }
+
+    // Prefer the newest-looking model name from the API response.
+    models.sort((a, b) => b.name.localeCompare(a.name));
+
+    cachedModel = models[0].name.replace(/^models\//, "");
+    modelCacheTime = Date.now();
+
+    console.log("Selected Gemini model:", cachedModel);
+
+    return cachedModel;
+}
+
 app.post("/chat", async (req, res) => {
     try {
         if (!GEMINI_API_KEY) {
             return res.status(500).json({
-                error: "AI backend is not configured."
+                error: "GEMINI_API_KEY is missing in Voroa environment variables."
             });
         }
 
-        const message = req.body.message;
+        const message = req.body?.message;
 
         if (
             typeof message !== "string" ||
@@ -36,8 +88,10 @@ app.post("/chat", async (req, res) => {
             });
         }
 
+        const model = await getAvailableModel();
+
         const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
             {
                 method: "POST",
                 headers: {
@@ -66,33 +120,41 @@ app.post("/chat", async (req, res) => {
 
         if (!response.ok) {
             console.error("Gemini API error:", data);
+
+            if (response.status === 404 || response.status === 403) {
+                cachedModel = null;
+                modelCacheTime = 0;
+            }
+
             return res.status(502).json({
-                error: "AI service could not process the request."
+                error: "Gemini could not process the request. Check server logs."
             });
         }
 
-        const answer =
-            data.candidates?.[0]?.content?.parts
-                ?.map(part => part.text || "")
-                .join("")
-                .trim();
+        const answer = data.candidates?.[0]?.content?.parts
+            ?.map(part => part.text || "")
+            .join("")
+            .trim();
 
         if (!answer) {
+            console.error("Empty Gemini response:", data);
+
             return res.status(502).json({
-                error: "No AI response received."
+                error: "Gemini returned an empty response."
             });
         }
 
-        res.json({
+        return res.json({
             success: true,
-            reply: answer
+            reply: answer,
+            model: model
         });
 
     } catch (error) {
-        console.error("Server error:", error);
+        console.error("SHIVAM AI error:", error);
 
-        res.status(500).json({
-            error: "Internal server error."
+        return res.status(502).json({
+            error: error.message || "AI service is temporarily unavailable."
         });
     }
 });
