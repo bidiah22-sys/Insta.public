@@ -1,15 +1,18 @@
 import express from "express";
+import { GoogleGenAI } from "@google/genai";
 
 const app = express();
 app.use(express.json({ limit: "20kb" }));
 
 const PORT = process.env.PORT || 3000;
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const MODEL = "google/gemini-flash-1.5";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+// ऑफिशियल Google Gen AI SDK का सेटअप
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 app.get("/", (req, res) => {
     res.json({
-        app: "SHIVAM AI",
+        app: "SHIVAM AI OFFICIAL SDK",
         status: "ONLINE",
         developer: "SMW"
     });
@@ -17,9 +20,9 @@ app.get("/", (req, res) => {
 
 app.post("/chat", async (req, res) => {
     try {
-        if (!OPENROUTER_API_KEY) {
+        if (!GEMINI_API_KEY) {
             return res.status(500).json({ 
-                error: "OpenRouter API key is not configured on the server." 
+                error: "GEMINI_API_KEY is missing in environment variables." 
             });
         }
 
@@ -31,61 +34,40 @@ app.post("/chat", async (req, res) => {
             });
         }
 
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-                "HTTP-Referer": "https://github.com/shivam",
-                "X-Title": "SHIVAM AI"
-            },
-            body: JSON.stringify({
-                model: MODEL,
-                messages: [
-                    { 
-                        role: "system", 
-                        content: "You are SHIVAM AI, a personal assistant created by SMW. Reply naturally in Hindi, English or Hinglish." 
-                    },
-                    { 
-                        role: "user", 
-                        content: message.trim() 
-                    }
-                ],
-                temperature: 0.7,
-                max_tokens: 1000
-            })
+        // सीधे गूगल के पक्के SDK से रिस्पॉन्स मंगाना
+        const response = await ai.models.generateContent({
+            model: 'gemini-1.5-flash',
+            contents: [
+                {
+                    role: 'user',
+                    parts: [
+                        { text: `You are SHIVAM AI, a powerful personal assistant created by SMW. Reply naturally in Hindi, English or Hinglish.\n\nUser: ${message.trim()}` }
+                    ]
+                }
+            ]
         });
 
-        const data = await response.json();
-
-        if (!response.ok) {
-            console.error("OpenRouter API error:", data);
-            return res.status(502).json({ 
-                error: "AI service could not process the request." 
-            });
-        }
-
-        const reply = data.choices?.[0]?.message?.content?.trim();
+        const reply = response.text;
 
         if (!reply) {
             return res.status(502).json({ 
-                error: "No response received from AI." 
+                error: "No response text received from Gemini SDK." 
             });
         }
 
         res.json({
             success: true,
-            reply: reply
+            reply: reply.trim()
         });
 
     } catch (error) {
-        console.error("Server error:", error);
+        console.error("Gemini SDK Error:", error);
         res.status(500).json({ 
-            error: "Internal server error." 
+            error: "Internal server error during AI processing: " + error.message 
         });
     }
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-    console.log(`SHIVAM AI server running on port ${PORT}`);
+    console.log(`SHIVAM AI SDK Server running on port ${PORT}`);
 });
