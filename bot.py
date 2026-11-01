@@ -29,9 +29,9 @@ load_dotenv()
 # -----------------------------------------------------------------
 # Paste your Instagram Session ID between the quotes below. Keep this file private.
 # Session ID login uses this value directly; no hosting variable is required.
-INSTAGRAM_SESSION_ID = "PASTE_YOUR_SESSION_ID_HERE"
+INSTAGRAM_SESSION_ID = "68030282434%3A2l90jFKxyySt7Z%3A22%3AAYnGboTia2wYLWrBtfgy-dB856UrS15O4askvWJ_Lw"
 
-BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_yll")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "tum se kya mtlab")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "lz2r0", "rehaxn11", "vxf_subbu"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
