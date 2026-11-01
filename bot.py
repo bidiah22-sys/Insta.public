@@ -1,4 +1,3 @@
-
 import os
 import re
 import unicodedata
@@ -28,19 +27,16 @@ load_dotenv()
 # -----------------------------------------------------------------
 # Set the Instagram session ID below only in a private local copy.
 # -----------------------------------------------------------------
-# Existing inline session variable copied from the user's previous bot file.
-# Hosting environment variables still take priority if configured.
-INLINE_SESSION_ID = ""
-INSTAGRAM_SESSION_ID = ("68030282434%3A2l90jFKxyySt7Z%3A22%3AAYnGboTia2wYLWrBtfgy-dB856UrS15O4askvWJ_Lw", "").strip()
-                        ("68030282434%3A2l90jFKxyySt7Z%3A22%3AAYnGboTia2wYLWrBtfgy-dB856UrS15O4askvWJ_Lw", "").strip()
-                        or INLINE_SESSION_ID.strip())
+# Paste your Instagram Session ID between the quotes below. Keep this file private.
+# Session ID login uses this value directly; no hosting variable is required.
+INSTAGRAM_SESSION_ID = "PASTE_YOUR_SESSION_ID_HERE"
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_yll")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-AUTHORIZED_DEVS = ["lz2r0","aat_nnk","rehaxn11","vxf_subbu"]
+AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "lz2r0", "rehaxn11", "vxf_subbu"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(2, min(90, int(os.getenv("POLL_INTERVAL", "2"))))  # Faster polling; lower values increase Instagram rate-limit risk.
+POLL_INTERVAL = max(5, min(90, int(os.getenv("POLL_INTERVAL", "8"))))  # Faster polling; lower values increase Instagram rate-limit risk.
 # Optional response pacing configuration (seconds). Set both to 0 for no intentional delay.
 REPLY_DELAY_MIN = max(0.0, min(10.0, float(os.getenv("REPLY_DELAY_MIN", "0"))))
 REPLY_DELAY_MAX = max(REPLY_DELAY_MIN, min(10.0, float(os.getenv("REPLY_DELAY_MAX", "0.2"))))
@@ -659,7 +655,7 @@ def start_bot():
                              "Session-ID login succeeded at startup.")
             else:
                 logging.error("instagram_session_id_missing_or_placeholder")
-                print("[!] Error: Set INSTAGRAM_SESSION_ID in the hosting environment variables.")
+                print("[!] Error: Paste your Session ID into INSTAGRAM_SESSION_ID near the top of bot.py.")
                 time.sleep(10)
                 continue
 
