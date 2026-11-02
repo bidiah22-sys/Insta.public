@@ -29,14 +29,14 @@ load_dotenv()
 # -----------------------------------------------------------------
 # Paste your Instagram Session ID between the quotes below. Keep this file private.
 # Session ID login uses this value directly; no hosting variable is required.
-INSTAGRAM_SESSION_ID = "PASTE_YOUR_SESSION_ID_HERE"
+INSTAGRAM_SESSION_ID = "68030282434%3AEzky5DIwRe3ros%3A5%3AAYmB_u6FQya2nyo0mNZfsL_k99b13eUtpsCEnO77nQ"
 
 BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_yll")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 AUTHORIZED_DEVS = ["fx_smw", "aat_nnk25", "lz2r0", "rehaxn11", "vxf_subbu"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(5, min(90, int(os.getenv("POLL_INTERVAL", "8"))))  # Faster polling; lower values increase Instagram rate-limit risk.
+POLL_INTERVAL = max(2, min(90, int(os.getenv("POLL_INTERVAL", "8"))))  # Faster polling; lower values increase Instagram rate-limit risk.
 # Optional response pacing configuration (seconds). Set both to 0 for no intentional delay.
 REPLY_DELAY_MIN = max(0.0, min(10.0, float(os.getenv("REPLY_DELAY_MIN", "0"))))
 REPLY_DELAY_MAX = max(REPLY_DELAY_MIN, min(10.0, float(os.getenv("REPLY_DELAY_MAX", "0.2"))))
