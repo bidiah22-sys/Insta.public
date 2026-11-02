@@ -27,19 +27,22 @@ load_dotenv()
 # -----------------------------------------------------------------
 # Set the Instagram session ID below only in a private local copy.
 # -----------------------------------------------------------------
-# Paste your Instagram Session ID between the quotes below. Keep this file private.
-# Session ID login uses this value directly; no hosting variable is required.
-INSTAGRAM_SESSION_ID = "68030282434%3A2l90jFKxyySt7Z%3A22%3AAYnGboTia2wYLWrBtfgy-dB856UrS15O4askvWJ_Lw"
+# Existing inline session variable copied from the user's previous bot file.
+# Hosting environment variables still take priority if configured.
+INLINE_SESSION_ID = ""
+INSTAGRAM_SESSION_ID = (os.getenv("INSTAGRAM_SESSION_ID", "").strip()
+                        or os.getenv("IG_SESSION_ID", "").strip()
+                        or INLINE_SESSION_ID.strip())
 
-BOT_USERNAME = os.getenv("BOT_USERNAME", "tum se kya mtlab")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "bot_hu_yll")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-AUTHORIZED_DEVS = ["fx_smw", "aat_nnk", "lz2r0", "rehaxn11", "vxf_subbu"]
+AUTHORIZED_DEVS = ["fx_smw","aat_nnk25"]
 DEV_LINE = "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bot_database.db")
-POLL_INTERVAL = max(5, min(90, int(os.getenv("POLL_INTERVAL", "8"))))  # Faster polling; lower values increase Instagram rate-limit risk.
+POLL_INTERVAL = max(15, min(90, int(os.getenv("POLL_INTERVAL", "15"))))  # Conservative polling protects the account from API pressure.
 # Optional response pacing configuration (seconds). Set both to 0 for no intentional delay.
-REPLY_DELAY_MIN = max(0.0, min(10.0, float(os.getenv("REPLY_DELAY_MIN", "0"))))
-REPLY_DELAY_MAX = max(REPLY_DELAY_MIN, min(10.0, float(os.getenv("REPLY_DELAY_MAX", "0.2"))))
+REPLY_DELAY_MIN = max(0.0, min(10.0, float(os.getenv("REPLY_DELAY_MIN", "1"))))
+REPLY_DELAY_MAX = max(REPLY_DELAY_MIN, min(10.0, float(os.getenv("REPLY_DELAY_MAX", "2"))))
 THREAD_SCAN_AMOUNT = max(20, min(100, int(os.getenv("THREAD_SCAN_AMOUNT", "40"))))
 TIMEZONE_NAME = os.getenv("TIMEZONE", "Asia/Kolkata")
 SEEN_MESSAGE_CACHE_LIMIT = 5000
@@ -50,6 +53,7 @@ STARTED_AT = time.time()
 TOTAL_SEEN_MESSAGES = 0
 LAST_SUCCESSFUL_POLL = None
 LAST_POLL_ERROR = "None"
+HEARTBEAT_FILE = Path(os.getenv("SMW_HEARTBEAT_FILE", "smw_heartbeat.txt"))
 logging.basicConfig(filename="bot_runtime.log", level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 # A local hold marker prevents Railway/process restarts from immediately retrying
 # an Instagram session that has already been rejected. Clear it only after manual
@@ -211,17 +215,6 @@ class BotSetting(Base):
     __tablename__ = "bot_settings"
     key = Column(String, primary_key=True)
     value = Column(Text, nullable=False, default="")
-
-
-class BirthdayEntry(Base):
-    """Per-group birthday registrations; dates are stored without a birth year."""
-    __tablename__ = "birthday_entries"
-    group_id = Column(String, primary_key=True)
-    user_id = Column(String, primary_key=True)
-    username = Column(String, nullable=False, default="Member")
-    month = Column(Integer, nullable=False)
-    day = Column(Integer, nullable=False)
-    created_at = Column(DateTime, default=get_utc_now)
 
 
 class SecurityLog(Base):
@@ -655,7 +648,7 @@ def start_bot():
                              "Session-ID login succeeded at startup.")
             else:
                 logging.error("instagram_session_id_missing_or_placeholder")
-                print("[!] Error: Paste your Session ID into INSTAGRAM_SESSION_ID near the top of bot.py.")
+                print("[!] Error: Set INSTAGRAM_SESSION_ID in the hosting environment variables.")
                 time.sleep(10)
                 continue
 
@@ -755,6 +748,10 @@ def start_bot():
                     threads = list(cl.direct_threads(amount=THREAD_SCAN_AMOUNT) or [])
                     LAST_SUCCESSFUL_POLL = datetime.now(timezone.utc).isoformat()
                     LAST_POLL_ERROR = "None"
+                    try:
+                        HEARTBEAT_FILE.write_text(LAST_SUCCESSFUL_POLL, encoding="utf-8")
+                    except Exception:
+                        logging.exception("heartbeat_write_failed")
                     current_time_loop = time.time()
 
                     now = datetime.now(ZoneInfo("Asia/Kolkata"))
@@ -800,25 +797,6 @@ def start_bot():
                         users = list(getattr(thread, "users", []) or [])
                         gc_name = (getattr(thread, "thread_title", None) or getattr(thread, "title", None) or getattr(thread, "name", None) or "Unknown GC")
                         record_group_snapshot(thread_id, str(gc_name), users)
-                        # Birthday greetings are isolated per GC and sent once per local calendar day.
-                        birthday_day_key = f"birthday_sent:{thread_id}:{current_date_str}"
-                        if load_setting(birthday_day_key, "0") != "1":
-                            birthday_db = SessionLocal()
-                            try:
-                                birthday_rows = birthday_db.query(BirthdayEntry).filter_by(
-                                    group_id=str(thread_id), month=now.month, day=now.day
-                                ).all()
-                                birthday_names = [fix_mention(row.username) for row in birthday_rows]
-                            finally:
-                                birthday_db.close()
-                            if birthday_names:
-                                names_text = "\n".join(f"🎂 {name}" for name in birthday_names)
-                                safe_send_message(thread_id,
-                                    "🎉🎂 𝗛𝗔𝗣𝗣𝗬 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬! 🎂🎉\n\n"
-                                    + names_text + "\n\n"
-                                    "💖 𝗪𝗜𝗦𝗛𝗜𝗡𝗚 𝗬𝗢𝗨 𝗝𝗢𝗬, 𝗟𝗢𝗩𝗘 & 𝗔𝗠𝗔𝗭𝗜𝗡𝗚 𝗠𝗘𝗠𝗢𝗥𝗜𝗘𝗦!"
-                                )
-                            save_setting(birthday_day_key, "1")
                         current_members = {str(getattr(u, "pk", "")) for u in users if getattr(u, "pk", None)}
                         for member in users:
                             member_pk = str(getattr(member, "pk", "") or "")
@@ -1071,22 +1049,17 @@ def start_bot():
 
                                 if command_prefix_present and command_lower == "!rules":
                                     rules_card = (
-                                        f"⚜🌷 𝗚𝗖 𝗥𝗨𝗟𝗘𝗦 • 𝗣𝗟𝗘𝗔𝗦𝗘 𝗥𝗘𝗔𝗗 🌷⚜️\n\n"
-                                        f"🤝 𝗥𝗘𝗦𝗣𝗘𝗖𝗧 𝗘𝗩𝗘𝗥𝗬𝗢𝗡𝗘\n"
-                                        f"💌 𝗞𝗘𝗘𝗣 𝗧𝗛𝗘 𝗩𝗜𝗕𝗘 𝗙𝗥𝗜𝗘𝗡𝗗𝗟𝗬\n\n"
-                                        f"🚫 𝗡𝗢 𝗔𝗕𝗨𝗦𝗘 • 𝗡𝗢 𝗧𝗢𝗫𝗜𝗖𝗜𝗧𝗬\n"
-                                        f"⚠️ 𝗗𝗥𝗔𝗠𝗔 & 𝗙𝗜𝗚𝗛𝗧𝗦 𝗔𝗥𝗘 𝗡𝗢𝗧 𝗔𝗟𝗟𝗢𝗪𝗘𝗗\n\n"
-                                        f"🔞 𝗡𝗢 𝗡𝗦𝗙𝗪 / 𝗔𝗗𝗨𝗟𝗧 𝗖𝗢𝗡𝗧𝗘𝗡𝗧\n"
-                                        f"🛡️ 𝗞𝗘𝗘𝗣 𝗧𝗛𝗘 𝗚𝗖 𝗖𝗟𝗘𝗔𝗡\n\n"
-                                        f"📢 𝗡𝗢 𝗦𝗣𝗔𝗠 • 𝗡𝗢 𝗙𝗟𝗢𝗢𝗗𝗜𝗡𝗚\n"
-                                        f"🚫 𝗗𝗢𝗡'𝗧 𝗦𝗘𝗡𝗗 𝗥𝗘𝗣𝗘𝗔𝗧𝗘𝗗 𝗠𝗘𝗦𝗦𝗔𝗚𝗘𝗦\n\n"
-                                        f"👑 𝗥𝗘𝗦𝗣𝗘𝗖𝗧 𝗔𝗗𝗠𝗜𝗡𝗦 & 𝗠𝗢𝗗𝗘𝗥𝗔𝗧𝗢𝗥𝗦\n"
-                                        f"✨ 𝗙𝗢𝗟𝗟𝗢𝗪 𝗢𝗙𝗙𝗜𝗖𝗜𝗔𝗟 𝗜𝗡𝗦𝗧𝗥𝗨𝗖𝗧𝗜𝗢𝗡𝗦\n\n"
-                                        f"⚠️ 𝗥𝗨𝗟𝗘𝗦 𝗕𝗥𝗘𝗔𝗞 = 𝗪𝗔𝗥𝗡𝗜𝗡𝗚\n"
-                                        f"🚫 𝗥𝗘𝗣𝗘𝗔𝗧𝗘𝗗 𝗩𝗜𝗢𝗟𝗔𝗧𝗜𝗢𝗡𝗦 = 𝗥𝗘𝗠𝗢𝗩𝗔𝗟\n\n"
-                                        f"🌷 𝗦𝗧𝗔𝗬 𝗔𝗖𝗧𝗜𝗩𝗘 • 𝗦𝗧𝗔𝗬 𝗥𝗘𝗦𝗣𝗘𝗖𝗧𝗙𝗨𝗟 🌷\n"
-                                        f"💫 𝗘𝗡𝗝𝗢𝗬 • 𝗖𝗛𝗔𝗧 • 𝗚𝗥𝗢𝗪 • 𝗖𝗢𝗡𝗡𝗘𝗖𝗧 💫\n\n"
-                                        f"🤖 𝗕𝗢𝗧 ➜ {fix_mention(BOT_USERNAME)}"
+                                        f"🎀 𝗦𝗠𝗪 𝗚𝗖 𝗥𝗨𝗟𝗘𝗦 🚩\n\n"
+                                        f"1. 𝗥𝗲𝘀𝗽𝗲𝗰𝘁 𝗲𝘃𝗲𝗿𝘆 𝗺𝗲𝗺𝗯𝗲𝗿.\n"
+                                        f"2. 𝗡𝗼 𝗮𝗯𝘂𝘀𝗲, 𝗵𝗮𝗿𝗮𝘀𝘀𝗺𝗲𝗻𝘁, 𝗼𝗿 𝗽𝗲𝗿𝘀𝗼𝗻𝗮𝗹 𝗮𝘁𝘁𝗮𝗰𝗸𝘀.\n"
+                                        f"3. 𝗡𝗼 𝘀𝗽𝗮𝗺, 𝗳𝗹𝗼𝗼𝗱𝗶𝗻𝗴, 𝗼𝗿 𝗿𝗲𝗽𝗲𝗮𝘁𝗲𝗱 𝗺𝗲𝘀𝘀𝗮𝗴𝗲𝘀.\n"
+                                        f"4. 𝗡𝗼 𝟭𝟴+ 𝗼𝗿 𝗶𝗻𝗮𝗽𝗽𝗿𝗼𝗽𝗿𝗶𝗮𝘁𝗲 𝗰𝗼𝗻𝘁𝗲𝗻𝘁.\n"
+                                        f"5. 𝗡𝗼 𝘀𝗲𝗹𝗳-𝗽𝗿𝗼𝗺𝗼𝘁𝗶𝗼𝗻 𝘄𝗶𝘁𝗵𝗼𝘂𝘁 𝗮𝗱𝗺𝗶𝗻 𝗽𝗲𝗿𝗺𝗶𝘀𝘀𝗶𝗼𝗻.\n"
+                                        f"6. 𝗔𝘃𝗼𝗶𝗱 𝘂𝗻𝗻𝗲𝗰𝗲𝘀𝘀𝗮𝗿𝘆 𝘁𝗮𝗴𝗴𝗶𝗻𝗴 𝗮𝗻𝗱 𝗺𝗲𝗻𝘁𝗶𝗼𝗻𝘀.\n"
+                                        f"7. 𝗡𝗼 𝗳𝗶𝗴𝗵𝘁𝘀, 𝗱𝗿𝗮𝗺𝗮, 𝗼𝗿 𝗱𝗶𝘀𝗿𝘂𝗽𝘁𝗶𝘃𝗲 𝗯𝗲𝗵𝗮𝘃𝗶𝗼𝗿.\n"
+                                        f"8. 𝗙𝗼𝗹𝗹𝗼𝘄 𝗮𝗱𝗺𝗶𝗻𝘀' 𝗶𝗻𝘀𝘁𝗿𝘂𝗰𝘁𝗶𝗼𝗻𝘀.\n\n"
+                                        f"⚠️ 𝗥𝘂𝗹𝗲 𝗯𝗿𝗲𝗮𝗸𝗲𝗿𝘀 𝗺𝗮𝘆 𝗿𝗲𝗰𝗲𝗶𝘃𝗲 𝗮 𝘄𝗮𝗿𝗻𝗶𝗻𝗴 𝗼𝗿 𝗯𝗲 𝗿𝗲𝗺𝗼𝘃𝗲𝗱.\n\n"
+                                        f"💗 𝗞𝗲𝗲𝗽 𝗶𝘁 𝗳𝘂𝗻, 𝗳𝗿𝗶𝗲𝗻𝗱𝗹𝘆, 𝗮𝗻𝗱 𝗿𝗲𝘀𝗽𝗲𝗰𝘁𝗳𝘂𝗹!"
                                     )
                                     safe_send_message(thread_id, rules_card)
                                     continue
@@ -1141,102 +1114,10 @@ def start_bot():
 
                                 is_trying_command = command_prefix_present and command_token.startswith("!") and command_token != "!rules"
 
-                                # Self-service birthday registration; data is scoped to this GC.
-                                if command_prefix_present and command_token == "!birthday":
-                                    parts = command_text.split(maxsplit=2)
-                                    action = parts[1].casefold() if len(parts) > 1 else "help"
-                                    birthday_db = SessionLocal()
-                                    try:
-                                        if action == "set" and len(parts) > 2:
-                                            match = re.fullmatch(r"(\d{1,2})[-/](\d{1,2})", parts[2].strip())
-                                            if not match:
-                                                safe_send_message(thread_id, "Usage: 𝗦𝗠𝗪🚩 !birthday set DD-MM")
-                                            else:
-                                                day, month = int(match.group(1)), int(match.group(2))
-                                                try:
-                                                    datetime(2000, month, day)
-                                                except ValueError:
-                                                    safe_send_message(thread_id, "❌ Invalid date. Use DD-MM, for example 24-08.")
-                                                else:
-                                                    entry = birthday_db.query(BirthdayEntry).filter_by(
-                                                        group_id=str(thread_id), user_id=str(sender_id)
-                                                    ).first()
-                                                    if entry is None:
-                                                        entry = BirthdayEntry(group_id=str(thread_id), user_id=str(sender_id),
-                                                                             username=sender_username, month=month, day=day)
-                                                        birthday_db.add(entry)
-                                                    else:
-                                                        entry.username, entry.month, entry.day = sender_username, month, day
-                                                    birthday_db.commit()
-                                                    safe_send_message(thread_id, f"🎂 Birthday saved for @{sender_username}: {day:02d}-{month:02d}. This registration is only for this GC.")
-                                        elif action in {"remove", "delete", "clear"}:
-                                            entry = birthday_db.query(BirthdayEntry).filter_by(
-                                                group_id=str(thread_id), user_id=str(sender_id)
-                                            ).first()
-                                            if entry:
-                                                birthday_db.delete(entry); birthday_db.commit()
-                                                safe_send_message(thread_id, "✅ Your birthday registration was removed from this GC.")
-                                            else:
-                                                safe_send_message(thread_id, "ℹ️ You do not have a birthday registered in this GC.")
-                                        elif action == "list":
-                                            rows = birthday_db.query(BirthdayEntry).filter_by(group_id=str(thread_id)).order_by(
-                                                BirthdayEntry.month, BirthdayEntry.day, BirthdayEntry.username
-                                            ).all()
-                                            listing = "\n".join(f"🎂 @{r.username} — {r.day:02d}-{r.month:02d}" for r in rows)
-                                            safe_send_message(thread_id, "🎂 𝗚𝗖 𝗕𝗜𝗥𝗧𝗛𝗗𝗔𝗬 𝗟𝗜𝗦𝗧\n\n" + (listing or "No birthdays registered yet."))
-                                        else:
-                                            safe_send_message(thread_id, "🎂 Birthday commands:\n𝗦𝗠𝗪🚩 !birthday set DD-MM\n𝗦𝗠𝗪🚩 !birthday list\n𝗦𝗠𝗪🚩 !birthday remove")
-                                    except Exception:
-                                        birthday_db.rollback(); logging.exception("birthday_command_failed")
-                                        safe_send_message(thread_id, "⚠️ Could not update birthday data. Please try again.")
-                                    finally:
-                                        birthday_db.close()
-                                    continue
-
                                 if is_trying_command and not is_dev:
                                     continue
 
                                 if is_dev and command_prefix_present and command_lower.startswith("!"):
-                                    # Call/music status cards are intentionally honest: the current
-                                    # instagrapi integration does not expose supported live group-call
-                                    # answer/join or audio-publishing controls. Never claim playback.
-                                    if command_token in {"!call", "!play", "!stop", "!musicstatus"}:
-                                        requested_song = command_text.split(maxsplit=1)[1].strip() if len(command_text.split(maxsplit=1)) > 1 else "Not specified"
-                                        if command_token == "!call":
-                                            card = (
-                                                "📞 🎀 𝗦𝗠𝗪 𝗖𝗔𝗟𝗟 𝗖𝗢𝗡𝗧𝗥𝗢𝗟 🎀\n\n"
-                                                "📡 𝗥𝗘𝗤𝗨𝗘𝗦𝗧 ➜ CALL JOIN / PICKUP\n"
-                                                "🔴 𝗦𝗧𝗔𝗧𝗨𝗦 ➜ NOT AVAILABLE\n\n"
-                                                "⚠️ 𝗧𝗘𝗖𝗛𝗡𝗜𝗖𝗔𝗟 𝗡𝗢𝗧𝗘\n"
-                                                "The current Instagram client does not provide a supported live group-call answer/join interface. No call was started.\n\n"
-                                                "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
-                                            )
-                                        elif command_token == "!play":
-                                            card = (
-                                                "🎵 🎀 𝗦𝗠𝗪 𝗠𝗨𝗦𝗜𝗖 𝗖𝗘𝗡𝗧𝗘𝗥 🎀\n\n"
-                                                f"🎧 𝗥𝗘𝗤𝗨𝗘𝗦𝗧𝗘𝗗 𝗧𝗥𝗔𝗖𝗞 ➜ {requested_song[:160]}\n"
-                                                "🔴 𝗣𝗟𝗔𝗬𝗕𝗔𝗖𝗞 𝗦𝗧𝗔𝗧𝗨𝗦 ➜ NOT STARTED\n\n"
-                                                "⚠️ 𝗧𝗘𝗖𝗛𝗡𝗜𝗖𝗔𝗟 𝗡𝗢𝗧𝗘\n"
-                                                "The current Instagram client does not provide live audio streaming into a group call. No music is playing.\n\n"
-                                                "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
-                                            )
-                                        elif command_token == "!stop":
-                                            card = (
-                                                "⏹️ 🎀 𝗦𝗠𝗪 𝗠𝗨𝗦𝗜𝗖 𝗖𝗘𝗡𝗧𝗘𝗥 🎀\n\n"
-                                                "ℹ️ 𝗣𝗟𝗔𝗬𝗕𝗔𝗖𝗞 𝗦𝗧𝗔𝗧𝗨𝗦 ➜ NO ACTIVE BOT PLAYBACK\n"
-                                                "Nothing was stopped because this integration cannot start live call playback.\n\n"
-                                                "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
-                                            )
-                                        else:
-                                            card = (
-                                                "📊 🎀 𝗦𝗠𝗪 𝗠𝗨𝗦𝗜𝗖 𝗦𝗧𝗔𝗧𝗨𝗦 🎀\n\n"
-                                                "🔴 𝗖𝗔𝗟𝗟 𝗜𝗡𝗧𝗘𝗚𝗥𝗔𝗧𝗜𝗢𝗡 ➜ NOT AVAILABLE\n"
-                                                "🔴 𝗟𝗜𝗩𝗘 𝗠𝗨𝗦𝗜𝗖 ➜ NOT PLAYING\n"
-                                                "ℹ️ 𝗥𝗘𝗔𝗦𝗢𝗡 ➜ Current Instagram client has no supported live-call audio control.\n\n"
-                                                "👑 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 ➜ 𝗦𝗠𝗪🚩"
-                                            )
-                                        safe_send_message(thread_id, card)
-                                        continue
                                     if command_token in {"!gc", "!gcanalytics"}:
                                         db = SessionLocal()
                                         try:
@@ -1402,11 +1283,9 @@ def start_bot():
                                         help_text = (
                                             "📚 𝗦𝗠𝗪 𝗕𝗢𝗧 — 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗚𝗨𝗜𝗗𝗘\n\n"
                                             "📊 GROUP: !gc | !gcanalytics | !gcs | !gcuser @username | !members | !active | !inactive 7 | !joins | !leaves\n\n"
-                                            "🎂 BIRTHDAYS: !birthday set DD-MM | !birthday list | !birthday remove (per-GC registration)\n\n"
                                             "🧾 HISTORY: !history 20 | !gchistory | !gcevents | !events | !memberhistory @username | !search WORD | !messages WORD\n\n"
                                             "🛡️ MODERATION: !rules | !antispam | !clearuser @username | !resetwarn @username | !lockdown | !unlock | !target @username | !target remove @username | !target list | !target clear | !shadowban @username | !nuke @username\n\n"
                                             "⚙️ DEVELOPER: !health | !performance | !status | !panel | !analytics | !botinfo | !session | !logs | !auditlog 20 | !backup | !report | !uptime | !safe_mode\n\n"
-                                            "📞 CALL / MUSIC STATUS: !call | !play SONG NAME | !stop | !musicstatus (status cards only; live Instagram call/audio control is not supported by this client)\n\n"
                                             "🧩 CUSTOM: !addcmd NAME | REPLY TEXT | !editcmd NAME | REPLY TEXT | !delcmd NAME | !cmds\n\n"
                                             "⏱️ TIMING: Set REPLY_DELAY_MIN and REPLY_DELAY_MAX in hosting environment variables (default 1–2 seconds). POLL_INTERVAL is separately limited to protect the Instagram session.\n"
                                             "🔒 Authorized developers are excluded from target actions. Link detection is disabled. Instagram may limit session/API access; no code can guarantee zero errors or permanent uptime.\n\n"
@@ -1426,7 +1305,7 @@ def start_bot():
                                         else:
                                             cmd_name = parts[1].strip().lstrip("!").casefold()
                                             reply_text = parts[2].split("|", 1)[1].strip()
-                                            if not re.fullmatch(r"[a-z0-9_]{2,32}", cmd_name) or cmd_name in {"help", "panel", "status", "analytics", "rules", "addcmd", "editcmd", "delcmd", "cmds", "clearuser", "resetuser", "unrestrict", "gc", "gcanalytics", "gcs", "gcuser", "session", "safe_mode", "logs", "backup", "lockdown", "unlock", "godmode", "target", "shadowban", "nuke", "resetwarn", "unwarn", "antispam", "report", "inactive", "tagall", "active", "members", "admins", "dp", "profile", "user", "stats", "botinfo", "uptime", "call", "play", "stop", "musicstatus"}:
+                                            if not re.fullmatch(r"[a-z0-9_]{2,32}", cmd_name) or cmd_name in {"help", "panel", "status", "analytics", "rules", "addcmd", "editcmd", "delcmd", "cmds", "clearuser", "resetuser", "unrestrict", "gc", "gcanalytics", "gcs", "gcuser", "session", "safe_mode", "logs", "backup", "lockdown", "unlock", "godmode", "target", "shadowban", "nuke", "resetwarn", "unwarn", "antispam", "report", "inactive", "tagall", "active", "members", "admins", "dp", "profile", "user", "stats", "botinfo", "uptime"}:
                                                 safe_send_message(thread_id, "❌ Invalid or reserved command name. Use 2-32 letters, digits, or underscores.")
                                             elif not reply_text:
                                                 safe_send_message(thread_id, "❌ Reply text cannot be empty.")
@@ -1802,4 +1681,24 @@ def start_bot():
 
 
 if __name__ == "__main__":
-    start_bot()
+    # Process supervisor: recover from unexpected function return/crash.
+    # Authentication/rate-limit holds are intentionally NOT retried automatically.
+    restart_delay = 10
+    while True:
+        try:
+            start_bot()
+            if auth_hold_exists():
+                logging.critical("supervisor_stopped_auth_hold_present")
+                print("[SUPERVISOR] Authentication/rate-limit hold is active. Verify the account/session, then remove the hold marker manually.")
+                break
+            logging.error("start_bot_returned_unexpectedly; restarting_after=%ss", restart_delay)
+            print(f"[SUPERVISOR] Bot returned unexpectedly; restarting in {restart_delay}s.")
+        except KeyboardInterrupt:
+            logging.info("shutdown_requested_keyboard_interrupt")
+            print("[SUPERVISOR] Shutdown requested.")
+            break
+        except Exception as supervisor_error:
+            logging.exception("supervisor_caught_unhandled_exception")
+            print(f"[SUPERVISOR] Unhandled {type(supervisor_error).__name__}; restarting in {restart_delay}s.")
+        time.sleep(restart_delay)
+        restart_delay = min(300, restart_delay * 2)
